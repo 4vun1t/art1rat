@@ -228,7 +228,7 @@ pub fn elevate_uac(command: &String) {
         .spawn();
 
     // ensure process is gone
-    thread::sleep(Duration::from_secs(2));
+    thread::sleep(Duration::from_secs(5));
 
     let inf = generate_inf_file(command);
     execute_cmstp(&inf);
