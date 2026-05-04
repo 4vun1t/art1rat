@@ -226,9 +226,3 @@ pub async fn netclient() -> Result<()> {
     }
     netclient_run(ClientConfig::default()).await
 }
-
-/// Actual binary entrypoint (thin wrapper)
-#[tokio::main]
-async fn main() -> Result<()> {
-    netclient().await
-}

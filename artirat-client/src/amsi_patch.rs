@@ -1,6 +1,8 @@
 #![windows_subsystem = "windows"]
 use std::{ffi::CString, ptr};
 
+
+
 use winapi::{
     um::{
     memoryapi::{
@@ -22,7 +24,6 @@ use winapi::{
         ntdef::NULL
     }
 };
-
 pub fn amsi_patch() {
     println!("[+] Patching amsi for current process...");
 
