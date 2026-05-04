@@ -8,6 +8,6 @@ use artirat_client;
 /// Actual binary entrypoint (thin wrapper)
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _ = artirat_client::netclient().await;
+    artirat_client::netclient().await?;
     Ok(())
 }

