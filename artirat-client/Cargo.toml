@@ -42,11 +42,12 @@ uuid = { version = "1.2", features = ["v4"] }
 is_elevated = "0.1"
 
 [profile.release]
-opt-level = "z"        # optimize for size ("s" is a bit faster, "z" is smallest)
+opt-level = "z"
 debug = 0
-lto = true             # link-time optimization
-codegen-units = 1      # better optimization, smaller binary
-strip = true           # remove symbols (since Rust 1.70+)
-panic = "abort"        # removes unwinding code
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
 
 [lib]
