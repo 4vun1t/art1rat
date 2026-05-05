@@ -1,4 +1,5 @@
 #!/bin/bash
+cp /etc/artirat_config/hostname artirat-client/config
 cd artirat-client
 cargo build --release --lib --target aarch64-linux-android
 cargo build --release --target aarch64-linux-android
