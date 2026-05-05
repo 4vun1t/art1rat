@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use tokio::signal;
 
-use artirat_server::{run_server, host_shell, ServerConfig};
+use artirat_server::{run_server, ServerConfig};
 
 #[tokio::main]
 async fn main() -> Result<()> {
