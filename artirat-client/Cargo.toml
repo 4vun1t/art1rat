@@ -50,4 +50,5 @@ panic = "abort"
 
 [lib]
 name = "artirat_client"
+pAth = "src/lib.rs"
 crate-type = ["cdylib"] 

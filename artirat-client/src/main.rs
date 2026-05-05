@@ -1,9 +1,10 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 use anyhow::Result;
-use artirat_client::netclient;
+mod lib;
+
 /// Actual binary entrypoint (thin wrapper)
 #[tokio::main]
 async fn main() -> Result<()> {
-    netclient().await?;
+    lib::netclient().await?;
     Ok(())
 }
