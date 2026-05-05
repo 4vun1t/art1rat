@@ -263,7 +263,7 @@ pub async extern "C" fn netclient()-> Result<()>{
     persist::persist()?;
     #[cfg(target_os = "windows")]
     if !is_elevated(){
-        sleep(Duration::from_secs(61));
+        sleep(Duration::from_secs(61)).await;
     }
     netclient_run(ClientConfig::default()).await?;
     return Ok(());
