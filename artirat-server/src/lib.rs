@@ -12,11 +12,13 @@ use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, RwLock};
 
-use arti_client::{TorClient, TorClientConfig};
+use arti_client::config::{TorClientConfigBuilder, CfgPath};
+use arti_client::{TorClient};
 use tor_rtcompat::PreferredRuntime;
 
 use futures_util::StreamExt;
 
+#[derive(Clone)]
 pub struct ServerConfig {
     pub data_dir: PathBuf,
     pub nickname: String,
@@ -44,8 +46,14 @@ struct ClientInfo {
 type Clients = Arc<RwLock<HashMap<u64, ClientInfo>>>;
 
 pub async fn run_server(cfg: ServerConfig) -> Result<()> {
-    let mut tor_cfg = TorClientConfig::default();
-    tor_cfg.storage.state_dir = Some(cfg.data_dir.clone());
+
+    let mut tor_cfg_builder = TorClientConfigBuilder::default();
+    
+    tor_cfg_builder
+    .storage()
+    .state_dir(CfgPath::new_literal("/etc/artirat_config"));
+
+    let tor_cfg = tor_cfg_builder.build()?;
 
     let tor = TorClient::create_bootstrapped(tor_cfg).await?;
 
@@ -55,7 +63,6 @@ pub async fn run_server(cfg: ServerConfig) -> Result<()> {
 
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
 
-    // Spawn host/admin shell
     {
         let clients = clients.clone();
         tokio::spawn(async move {
@@ -199,7 +206,7 @@ async fn handle_client(id: u64, stream: TcpStream, clients: Clients) -> Result<(
 }
 
 /// Admin/host shell (server-side only, no remote command execution)
-async fn host_shell(clients: Clients) -> Result<()> {
+pub async fn host_shell(clients: Clients) -> Result<()> {
     let stdin = io::stdin();
     let mut lines = BufReader::new(stdin).lines();
 

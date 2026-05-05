@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     });
 
     let shell_task = tokio::spawn(async move {
-        if let Err(e) = host_shell().await {
+        if let Err(e) = run_server(cfg).await {
             eprintln!("[!] Shell error: {e}");
         }
     });
