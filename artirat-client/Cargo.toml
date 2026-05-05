@@ -50,9 +50,4 @@ panic = "abort"
 
 [lib]
 name = "artirat_client"
-path = "src/lib.rs"
 crate-type = ["cdylib"] 
-
-[[bin]]
-name = "artirat-client"
-path = "src/main.rs"
