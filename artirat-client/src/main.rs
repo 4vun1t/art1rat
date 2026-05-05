@@ -1,5 +1,4 @@
 mod lib;
-
 use anyhow::Result;
 
 /// Actual binary entrypoint (thin wrapper)
