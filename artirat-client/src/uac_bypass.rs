@@ -1,6 +1,7 @@
 #[cfg(target_os = "windows")]
 mod fsr;
-
+use winreg::enums;
+use winreg::enums::{};
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Write;
@@ -19,7 +20,7 @@ use winapi::um::winuser::{SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, VK_RETUR
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
-use winreg::enums::*;
+use enums::HKEY_CURRENT_USER;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
@@ -35,12 +36,12 @@ pub fn set_hkcu_value(
     value: Option<&str>,
     create: bool,
 ) -> std::io::Result<()> {
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let hkcu = RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
 
     let key = if create {
         hkcu.create_subkey(path)?.0
     } else {
-        hkcu.open_subkey_with_flags(path, KEY_SET_VALUE)?
+        hkcu.open_subkey_with_flags(path, enums::KEY_SET_VALUE)?
     };
 
     match (name, value) {
@@ -189,7 +190,7 @@ fn simulate_keypress() {
 
 /// Delete registry key
 pub fn delete_hkcu_key(path: &str) -> std::io::Result<()> {
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let hkcu = RegKey::predef(winreg::enums::HKEY_CURRENT_USER);
     let _ = hkcu.delete_subkey_all(path);
     Ok(())
 }

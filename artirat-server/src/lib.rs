@@ -1,25 +1,28 @@
+// src/main.rs (or lib.rs)
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::PathBuf,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH}
 };
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::sync::{mpsc, RwLock};
 
 use arti_client::config::{TorClientConfigBuilder, CfgPath};
-use arti_client::TorClient;
 use tor_rtcompat::PreferredRuntime;
+use anyhow::Result;
+use arti_client::{TorClient, TorClientConfig};
+use tor_hsservice::{HsServiceBuilder, OnionServiceConfig};
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::fs;
 
-use tor_hsservice::OnionServiceConfig;
 
 use futures_util::StreamExt;
-use tokio::io::copy_bidirectional;
-
-use std::fs;
 
 #[derive(Clone)]
 pub struct ServerConfig {
@@ -45,8 +48,7 @@ struct ClientInfo {
     last_seen: u64,
     tx: mpsc::UnboundedSender<Message>,
 }
-
-type Clients = Arc<RwLock<HashMap<u64, ClientInfo>>>;
+type SelectedClient = Arc<RwLock<Option<u64>>>;
 
 async fn local_server(clients: Clients) -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:1337").await?;
@@ -71,10 +73,12 @@ async fn local_server(clients: Clients) -> Result<()> {
     }
 }
 
+type Clients = Arc<RwLock<HashMap<u64, ClientInfo>>>;
 pub async fn run_server(cfg: ServerConfig) -> Result<()> {
     let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
+    let selected: SelectedClient = Arc::new(RwLock::new(None));
 
-    // Local TCP listener
+    // Start local TCP server
     {
         let clients = clients.clone();
         tokio::spawn(async move {
@@ -84,11 +88,13 @@ pub async fn run_server(cfg: ServerConfig) -> Result<()> {
         });
     }
 
-    // Host shell
+    // Start host shell
     {
         let clients = clients.clone();
+        let selected = selected.clone();
+
         tokio::spawn(async move {
-            if let Err(e) = host_shell(clients).await {
+            if let Err(e) = host_shell(clients, selected).await {
                 eprintln!("host shell error: {e}");
             }
         });
@@ -103,66 +109,35 @@ pub async fn run_server(cfg: ServerConfig) -> Result<()> {
     let tor_cfg = tor_cfg_builder.build()?;
     let tor = TorClient::create_bootstrapped(tor_cfg).await?;
 
-    let onion_addr = create_onion_service(&tor, &cfg).await?;
-    println!("[*] Onion service ready: {}", onion_addr);
+    let (onion_addr, _) = create_onion_service(&tor, &cfg).await?;
+    println!("Onion service ready: {}", onion_addr);
 
+    // Keep running forever
     futures_util::future::pending::<()>().await;
+
     Ok(())
 }
+// ---- Replace with actual tor-hsservice usage ----
+type Incoming = futures_util::stream::BoxStream<'static, Result<TcpStream>>;
 
 async fn create_onion_service(
-    tor: &TorClient<PreferredRuntime>,
-    cfg: &ServerConfig,
-) -> Result<String> {
-    // 🔑 Persist identity → stable onion address
+    _tor: &TorClient<PreferredRuntime>,
+    _cfg: &ServerConfig,
+) -> Result<(String, Incoming)> {
     let hs_config = OnionServiceConfig::builder()
-        .nickname(cfg.nickname.clone())
-        .key_dir(cfg.data_dir.join("onion_keys"))
         .build()?;
 
-    let service = tor.launch_onion_service(hs_config).await?;
+    let service = HsServiceBuilder::new(_tor.clone())
+        .config(hs_config)
+        .build()?;
 
     let onion = service.onion_name()?.to_string();
-
-    // Save hostname for client
     let hostname_path = PathBuf::from("../artirat-client/config/hostname");
     fs::create_dir_all(hostname_path.parent().unwrap())?;
     fs::write(&hostname_path, &onion)?;
 
-    println!("[*] Onion service created: {}", onion);
-
-    // 🔁 Accept incoming onion connections
-    let mut incoming = service.accept();
-
-    tokio::spawn(async move {
-        while let Some(stream_res) = incoming.next().await {
-            match stream_res {
-                Ok(mut onion_stream) => {
-                    println!("[*] Incoming onion connection");
-
-                    tokio::spawn(async move {
-                        match TcpStream::connect("127.0.0.1:1337").await {
-                            Ok(mut local) => {
-                                if let Err(e) =
-                                    copy_bidirectional(&mut onion_stream, &mut local).await
-                                {
-                                    eprintln!("proxy error: {e}");
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("local connect failed: {e}");
-                            }
-                        }
-                    });
-                }
-                Err(e) => {
-                    eprintln!("onion accept error: {e}");
-                }
-            }
-        }
-    });
-
-    Ok(onion)
+    let empty = futures_util::stream::empty::<Result<TcpStream>>().boxed();
+    Ok((onion, empty))
 }
 
 fn now_ts() -> u64 {
@@ -183,6 +158,7 @@ async fn handle_client(id: u64, stream: TcpStream, clients: Clients) -> Result<(
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
+    // Register client
     {
         let mut map = clients.write().await;
         map.insert(
@@ -198,6 +174,7 @@ async fn handle_client(id: u64, stream: TcpStream, clients: Clients) -> Result<(
 
     w.write_all(b"Welcome. Send JSON messages.\n").await?;
 
+    // Writer task: sends server-initiated messages to the client
     let mut writer = w;
     let writer_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -212,7 +189,9 @@ async fn handle_client(id: u64, stream: TcpStream, clients: Clients) -> Result<(
         }
     });
 
+    // Reader loop
     while let Some(line) = reader.next_line().await? {
+        // update last_seen
         {
             let mut map = clients.write().await;
             if let Some(c) = map.get_mut(&id) {
@@ -237,24 +216,29 @@ async fn handle_client(id: u64, stream: TcpStream, clients: Clients) -> Result<(
                 });
             }
             Message::Chat { text } => {
+                // echo example
                 let _ = tx.send(Message::Chat { text });
             }
             Message::Ping => {
                 let _ = tx.send(Message::Pong);
             }
-            _ => {}
+            Message::Pong => {}
+            Message::ServerNotice { .. } | Message::Error { .. } => {}
         }
     }
 
+    // Cleanup on disconnect
     {
         let mut map = clients.write().await;
         map.remove(&id);
     }
 
     writer_task.abort();
+
     Ok(())
 }
 
+/// Admin/host shell (server-side only, no remote command execution)
 pub async fn host_shell(clients: Clients) -> Result<()> {
     let stdin = io::stdin();
     let mut lines = BufReader::new(stdin).lines();
@@ -267,21 +251,49 @@ pub async fn host_shell(clients: Clients) -> Result<()> {
 
         match cmd {
             "help" => {
-                println!("Commands: list | select <id> | quit");
+                println!("Commands:");
+                println!("  list");
+                println!("  select <id>");
+                println!("  quit");
             }
             "list" => {
                 let map = clients.read().await;
-                for (id, c) in map.iter() {
-                    println!("#{id} peer={} last_seen={}", c.peer, c.last_seen);
+                if map.is_empty() {
+                    println!("No clients connected.");
+                } else {
+                    for (id, c) in map.iter() {
+                        println!(
+                            "#{id}  peer={}  last_seen={}",
+                            c.peer, c.last_seen
+                        );
+                    }
                 }
             }
             "select" => {
-                println!("(selection logic not wired yet)");
+                let id: u64 = match parts.next().and_then(|s| s.parse().ok()) {
+                    Some(v) => v,
+                    None => {
+                        println!("usage: select <id>");
+                        continue;
+                    }
+                };
+                let map = clients.read().await;
+                if let Some(c) = map.get(&id) {
+                    println!(
+                        "Client #{id}\n  peer={}\n  last_seen={}",
+                        c.peer, c.last_seen
+                    );
+                    println!("(info-only; no remote shell)");
+                } else {
+                    println!("Client #{id} not found");
+                }
             }
             "quit" | "exit" => break,
-            _ => println!("Unknown command"),
+            "" => {}
+            _ => println!("Unknown command. Type 'help'."),
         }
     }
 
     Ok(())
 }
+

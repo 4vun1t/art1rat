@@ -4,6 +4,6 @@ use anyhow::Result;
 /// Actual binary entrypoint (thin wrapper)
 #[tokio::main]
 async fn main() -> Result<()> {
-    lib::netclient().await?;
+    let _ = lib::netclient().await?;
     Ok(())
 }
