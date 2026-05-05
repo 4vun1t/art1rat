@@ -55,4 +55,5 @@ strip = true
 panic = "abort"
 
 [lib]
-crate-type = ["cdylib","dylib"] 
+crate-type = ["cdylib"]
+#rustflags = ["-WlStatic"] 

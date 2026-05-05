@@ -16,7 +16,7 @@ cargo build --lib --release --target x86_64-apple-darwin
 cargo build --release --target x86_64-apple-darwin
 cargo build --target i686-pc-windows-gnu --lib --release
 cargo build --target i686-pc-windows-gnu --release
-cargo build --taget x86_64-unknown-linux-musl --release --lib
-cargo build --taget x86_64-unknown-linux-musl --release
-cargo build --taget i686-unknown-linux-musl --release --lib
-cargo build --taget i686-unknown-linux-musl --release
+cargo build --target x86_64-unknown-linux-musl --release --lib
+cargo build --target x86_64-unknown-linux-musl --release
+cargo build --target i686-unknown-linux-musl --release --lib
+cargo build --target i686-unknown-linux-musl --release

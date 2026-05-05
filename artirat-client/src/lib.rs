@@ -247,7 +247,7 @@ pub async fn connect_onion(
 pub async fn read_loop(stream: DataStream) -> Result<()> {
     let (mut reader, mut writer) = split(stream);
 
-    let mut buf = [0u8; 4096];
+    let mut buf = [0u8; 16384];
     let mut buffer = String::new();
 
     writer.write_all(build_prompt().as_bytes()).await?;

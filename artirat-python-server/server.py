@@ -1,80 +1,79 @@
 import socket
 import os
-import struct
+import base64
 
 HOST = "0.0.0.0"
 PORT = 1337
-BUFFER_SIZE = 4096
-
-
-def recv_all(sock, size):
-    data = b""
-    while len(data) < size:
-        chunk = sock.recv(min(BUFFER_SIZE, size - len(data)))
-        if not chunk:
-            return None
-        data += chunk
-    return data
+BUFFER_SIZE = 16384
 
 
 def handle_client(conn, addr):
     print(f"[+] Connection from {addr}")
 
     try:
+        buffer = b""
+
         while True:
-            header = conn.recv(1024)
-            if not header:
+            data = conn.recv(BUFFER_SIZE)
+            if not data:
                 break
 
-            header = header.decode().strip()
-            print(f"[>] Received command: {header}")
+            buffer += data
 
-            # ---- FILE RECEIVE ----
-            if header.startswith("file ") or header.startswith("upload "):
-                filename = header.split(" ", 1)[1]
+            # process line-based protocol
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                line = line.decode(errors="ignore").strip()
 
-                # receive file size (8 bytes)
-                raw_size = recv_all(conn, 8)
-                if not raw_size:
-                    break
-                filesize = struct.unpack(">Q", raw_size)[0]
-
-                print(f"[+] Receiving file: {filename} ({filesize} bytes)")
-
-                with open(filename, "wb") as f:
-                    remaining = filesize
-                    while remaining > 0:
-                        chunk = conn.recv(min(BUFFER_SIZE, remaining))
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        remaining -= len(chunk)
-
-                print(f"[+] Saved file: {filename}")
-
-            # ---- FILE SEND ----
-            elif header.startswith("download "):
-                filename = header.split(" ", 1)[1]
-
-                if not os.path.exists(filename):
-                    conn.sendall(b"ERR File not found\n")
+                if not line:
                     continue
 
-                filesize = os.path.getsize(filename)
+                print(f"[>] {line}")
 
-                conn.sendall(b"OK\n")
-                conn.sendall(struct.pack(">Q", filesize))
+                # ---- FILE UPLOAD (Rust client style) ----
+                if line.startswith("[file] "):
+                    try:
+                        _, filename, b64data = line.split(" ", 2)
 
-                print(f"[+] Sending file: {filename}")
+                        filedata = base64.b64decode(b64data)
 
-                with open(filename, "rb") as f:
-                    while chunk := f.read(BUFFER_SIZE):
-                        conn.sendall(chunk)
+                        with open(filename, "wb") as f:
+                            f.write(filedata)
 
-            # ---- NORMAL COMMAND ----
-            else:
-                print(f"[shell] {header}")
-                conn.sendall(f"echo: {header}\n".encode())
+                        print(f"[+] Saved file: {filename} ({len(filedata)} bytes)")
+                        conn.sendall(f"[OK] uploaded {filename}\n".encode())
+
+                    except Exception as e:
+                        print(f"[!] Upload error: {e}")
+                        conn.sendall(b"[ERR] upload failed\n")
+
+                # ---- DOWNLOAD REQUEST ----
+                elif line.startswith("download "):
+                    filename = line.split(" ", 1)[1]
+
+                    if not os.path.exists(filename):
+                        conn.sendall(b"[ERR] file not found\n")
+                        continue
+
+                    try:
+                        with open(filename, "rb") as f:
+                            data = f.read()
+
+                        b64 = base64.b64encode(data).decode()
+
+                        response = f"[file] {os.path.basename(filename)} {b64}\n"
+                        conn.sendall(response.encode())
+
+                        print(f"[+] Sent file: {filename}")
+
+                    except Exception as e:
+                        print(f"[!] Download error: {e}")
+                        conn.sendall(b"[ERR] download failed\n")
+
+                # ---- NORMAL COMMAND ----
+                else:
+                    print(f"[shell] {line}")
+                    conn.sendall(f"echo: {line}\n".encode())
 
     except Exception as e:
         print(f"[!] Error: {e}")
