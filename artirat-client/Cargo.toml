@@ -3,16 +3,7 @@ name = "artirat_client"
 version = "0.1.2"
 edition = "2024"
 
-[dependencies]
-arti-client = { version = "0.41", features = ["onion-service-client","rustls","static-sqlite"] }
-gethostname = "0.4.3"
-tor-rtcompat = { version = "0.41", features = ["tokio"] }
-tokio = { version = "1", features = ["full"] }
-anyhow = "1"
-rand = { version = "0.8", features = ["std", "std_rng"] }
-rusqlite = { version = "0", features = ["bundled"] }
-zstd = { version = "0.13", features = ["zstdmt"] }
-openssl = { version = "0", features = ["vendored"] }
+[target.'cfg(windows)'.dependencies]
 winapi = {version = "0.3.9", features=[
     "memoryapi",
     "libloaderapi",
@@ -34,9 +25,21 @@ windows = { version = "0.58", features = [
 ] }
 winres = "0"
 win32-error = "0.9.0"
+
+
+[dependencies]
+arti-client = { version = "0.41", features = ["onion-service-client","rustls","static-sqlite"] }
+gethostname = "0.4.3"
+tor-rtcompat = { version = "0.41", features = ["tokio"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+rand = { version = "0.8", features = ["std", "std_rng"] }
+rusqlite = { version = "0", features = ["bundled"] }
+zstd = { version = "0.13", features = ["zstdmt"] }
+openssl = { version = "0", features = ["vendored"] }
+
 uuid = { version = "1.2", features = ["v4"] }
 is_elevated = "0.1"
-winreg = "0"
 
 [profile.release]
 opt-level = "z"        # optimize for size ("s" is a bit faster, "z" is smallest)

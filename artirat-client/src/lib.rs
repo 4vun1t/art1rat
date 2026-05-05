@@ -27,32 +27,6 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-#[cfg(target_os = "windows")]
-fn kill_other_instances() {
-    use std::process::{Command, Stdio};
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(name) = exe.file_name().and_then(|n| n.to_str()) {
-            let current_pid = std::process::id();
-
-            let _ = Command::new("cmd.exe")
-                .creation_flags(CREATE_NO_WINDOW)
-                .args([
-                    "/C",
-                    &format!(
-                        "for /f \"tokens=2\" %a in ('tasklist ^| findstr {}') do @if not %a=={} taskkill /PID %a /F",
-                        name, current_pid
-                    ),
-                ])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
-        }
-    }
-}
 
 /// Public configuration struct
 #[derive(Clone, Debug)]
