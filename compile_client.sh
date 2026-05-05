@@ -1,8 +1,12 @@
 #!/bin/bash
+export CARGO_TARGET_ARMV7_LINUX_ANDROID_LINKER=armv7a-linux-androideabi21-clang
+CARGO_TARGET_ARMV7A_LINUX_ANDROID_LINKER=armv7a-linux-androideabi21-clang
 cp /etc/artirat_config/hostname artirat-client/config
 cd artirat-client
 cargo build --release --lib --target aarch64-linux-android
 cargo build --release --target aarch64-linux-android
+cargo build --release --lib --target armv7-linux-androideabi
+cargo build --release --target armv7-linux-androideabi
 cargo build --target x86_64-pc-windows-gnu --lib --release
 cargo build --target x86_64-pc-windows-gnu --release
 cargo build --release --lib --target x86_64-unknown-linux-musl
