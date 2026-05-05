@@ -2,8 +2,6 @@
 export CARGO_TARGET_ARMV7_LINUX_ANDROID_LINKER=armv7a-linux-androideabi21-clang
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=aarch64-linux-android21-clang
 cd artirat-client
-cargo build --release --lib --target armv7-linux-androideabi
-cargo build --release --target armv7-linux-androideabi
 cargo build --release --lib --target aarch64-linux-android
 cargo build --release --target aarch64-linux-android
 cargo build --target x86_64-pc-windows-gnu --lib --release
@@ -22,5 +20,3 @@ cargo build --taget x86_64-unknown-linux-musl --release --lib
 cargo build --taget x86_64-unknown-linux-musl --release
 cargo build --taget i686-unknown-linux-musl --release --lib
 cargo build --taget i686-unknown-linux-musl --release
-
-

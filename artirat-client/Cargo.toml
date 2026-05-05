@@ -39,8 +39,12 @@ rand = { version = "0.8", features = ["std", "std_rng"] }
 rusqlite = { version = "0", features = ["bundled"] }
 zstd = { version = "0.13", features = ["zstdmt"] }
 openssl = { version = "0", features = ["vendored"] }
-
+base64 = "0.22"
 uuid = { version = "1.2", features = ["v4"] }
+screenshots = {version = "0.8.10"}
+platform = {version = "1.0.1"}
+display-info = {version = "0.5.0"}
+rustix = {version = "1.1.1",features=["shm"]}
 
 [profile.release]
 opt-level = "z"
@@ -51,4 +55,4 @@ strip = true
 panic = "abort"
 
 [lib]
-crate-type = ["cdylib"] 
+crate-type = ["cdylib","dylib"] 

