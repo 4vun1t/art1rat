@@ -1,6 +1,6 @@
-#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
-use anyhow::Result;
 mod lib;
+
+use anyhow::Result;
 
 /// Actual binary entrypoint (thin wrapper)
 #[tokio::main]
