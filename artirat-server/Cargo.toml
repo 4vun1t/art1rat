@@ -1,23 +1,14 @@
 [package]
 name = "artirat-server"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-arti-client = { version = "0.41", features = ["onion-service-client","rustls","static-sqlite"] }
-gethostname = "0.4.3"
-tor-rtcompat = { version = "0.41", features = ["tokio"] }
+arti-client = "0.41"
+tor-hsservice = "0.41"      # onion service support
+tor-rtcompat = "0.41"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
-rand = { version = "0.8", features = ["std", "std_rng"] }
-rusqlite = { version = "0", features = ["bundled"] }
-zstd = { version = "0.13", features = ["zstdmt"] }
-openssl = { version = "0", features = ["vendored"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
-[profile.release]
-opt-level = "z"        # optimize for size ("s" is a bit faster, "z" is smallest)
-debug = 0
-lto = true             # link-time optimization
-codegen-units = 1      # better optimization, smaller binary
-strip = true           # remove symbols (since Rust 1.70+)
-panic = "abort"        # removes unwinding code

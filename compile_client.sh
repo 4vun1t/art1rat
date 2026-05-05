@@ -1,7 +1,5 @@
 #!/bin/bash
 cd artirat-client
-cargo build --lib --release --target armv7-linux-androideabi
-cargo build --release --target armv7-linux-androideabi
 cargo build --release --lib --target aarch64-linux-android
 cargo build --release --target aarch64-linux-android
 cargo build --target x86_64-pc-windows-gnu --lib --release
