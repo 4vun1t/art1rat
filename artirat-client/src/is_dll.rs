@@ -6,5 +6,5 @@ use winapi::um::libloaderapi::GetModuleHandleExW;
 use winapi::um::winnt::LPCWSTR;
 
 pub fn is_dll() -> bool {
-    return true;
+    return false;
 }

