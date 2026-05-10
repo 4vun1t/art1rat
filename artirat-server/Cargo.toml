@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
-arti-client = {version = "0.41.0",features=["onion-service-service"]}
+arti-client = { version = "0.41.0", features = ["onion-service-service"] }
 base64 = "0.22.1"
 futures-util = "0.3.32"
 tokio = { version = "1.52.2", features = ["full"] }

