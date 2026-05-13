@@ -22,8 +22,6 @@ use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 #[cfg(target_os = "windows")]
 use zstd::zstd_safe::OutBuffer;
-//#[cfg(target_os = "linux")]
-//use core::ffi::c_str::Bytes;
 use core::task;
 use std::{fs,env};
 use std::path::{Path};

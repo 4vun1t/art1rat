@@ -34,7 +34,7 @@ gethostname = "1.1.0"
 tor-rtcompat = { version = "0.41", features = ["tokio"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
-rusqlite = { version = "0", features = ["bundled"] }
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 zstd = { version = "0.13", features = ["zstdmt"] }
 openssl = { version = "0", features = ["vendored"] }
 base64 = "0.22"
@@ -51,7 +51,7 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
-['cfg(!musl)'.lib]
+[target.'cfg(musl)'.lib]
 crate-type = ["staticlib"] 
 [lib]
-crate-type = ["cdylib"] 
+crate-type = ["dylib"] 
