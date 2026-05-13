@@ -240,12 +240,26 @@ Available commands:
                 c
             };
 
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(target_os = "linux")]
             let mut command = {
-                let mut c = Command::new("sh");
+                let mut c = Command::new("/bin/sh");
                 c.arg("-c").arg(input);
                 c
             };
+            #[cfg(target_os = "macos")]
+            let mut command = {
+                let mut c = Command::new("/bin/sh");
+                c.arg("-c").arg(input);
+                c
+            };
+            #[cfg(target_os = "android")]
+            let mut command = {
+                let mut c = Command::new("/system/bin/sh");
+                c.arg("-c").arg(input);
+                c
+            };
+
+
 
             let output = command.output().await?;
 
