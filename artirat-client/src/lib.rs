@@ -361,11 +361,18 @@ pub async fn read_loop(stream: DataStream) -> Result<()> {
                 continue;
             }
 
-            let output = run_command(&line).await?;
-            writer.write_all(&output).await?;
+            match run_command(&line).await {
+              Ok(output) => {
+              writer.write_all(&output).await?;
+              }
+              Err(e) => {
+                let err_msg = format!("ERROR: {}\n", e);
+                writer.write_all(err_msg.as_bytes()).await?;
+    }
+}
 
-            writer.write_all(build_prompt().as_bytes()).await?;
-            writer.flush().await?;
+writer.write_all(build_prompt().as_bytes()).await?;
+writer.flush().await?;
         }
     }
 
