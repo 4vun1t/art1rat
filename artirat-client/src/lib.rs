@@ -83,7 +83,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     println!("Initialized Tor Client");
     Ok(client)
 }
-//#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "android"))]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
@@ -102,6 +102,66 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
     // Convert PNG bytes -> base64
     let b64 = general_purpose::STANDARD.encode(&png_bytes);
     Ok(format!("{}",b64))
+}
+#[cfg(target_os = "android")]
+pub fn take_screenshot_base64() -> Result<String> {
+    use std::process::Command;
+
+    // Android built-in screenshot utility
+    let output = Command::new("/system/bin/screencap")
+        .arg("-p")
+        .output()?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "screencap failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // stdout already contains PNG bytes
+    Ok(general_purpose::STANDARD.encode(&output.stdout))
+}
+
+
+
+#[cfg(target_os = "android")]
+pub fn take_screenshot_base64() -> anyhow::Result<String> {
+    use anyhow::{anyhow, Result};
+    use base64::{engine::general_purpose, Engine as _};
+    use std::fs;
+    use std::path::Path;
+    use std::process::Command;
+
+    // Temporary screenshot path
+    let screenshot_path = "/data/local/tmp/screenshot.png";
+
+    // Run Android screencap utility
+    let output = Command::new("/system/bin/screencap")
+        .arg("-p")
+        .arg(screenshot_path)
+        .output()?;
+
+    // Ensure screencap succeeded
+    if !output.status.success() {
+        return Err(anyhow!(
+            "screencap failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let path = Path::new(screenshot_path);
+
+    // Read PNG bytes
+    let png_bytes = fs::read(path)?;
+
+    // Remove temporary screenshot file
+    fs::remove_file(path)?;
+
+    // Encode PNG bytes as base64
+    let encoded = general_purpose::STANDARD.encode(&png_bytes);
+
+    Ok(encoded)
 }
 
 /// Build prompt string
