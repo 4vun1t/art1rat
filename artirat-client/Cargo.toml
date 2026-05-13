@@ -42,7 +42,6 @@ openssl = { version = "0", features = ["vendored"] }
 base64 = "0.22"
 uuid = { version = "1.11.1", features = ["v4"] }
 libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
-['!cfg(android)'.dependencies]
 screenshots = "0.8.10"
 
 

