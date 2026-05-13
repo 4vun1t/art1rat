@@ -83,6 +83,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     println!("Initialized Tor Client");
     Ok(client)
 }
+
 #[cfg(not(target_os = "android"))]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
@@ -103,27 +104,6 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
     let b64 = general_purpose::STANDARD.encode(&png_bytes);
     Ok(format!("{}",b64))
 }
-#[cfg(target_os = "android")]
-pub fn take_screenshot_base64() -> Result<String> {
-    use std::process::Command;
-
-    // Android built-in screenshot utility
-    let output = Command::new("/system/bin/screencap")
-        .arg("-p")
-        .output()?;
-
-    if !output.status.success() {
-        return Err(anyhow!(
-            "screencap failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    // stdout already contains PNG bytes
-    Ok(general_purpose::STANDARD.encode(&output.stdout))
-}
-
-
 
 #[cfg(target_os = "android")]
 pub fn take_screenshot_base64() -> anyhow::Result<String> {
