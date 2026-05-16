@@ -437,7 +437,7 @@ def create_hidden_service(controller):
 
 def write_hostname(hostname: str):
     os.makedirs(CLIENT_CONFIG_DIR, exist_ok=True)
-    content = hostname + "\n"
+    content = hostname
     with open(CLIENT_HOSTNAME_PATH, "w") as f:
         f.write(content)
     print(f"[+] Wrote hostname to {CLIENT_HOSTNAME_PATH}")
