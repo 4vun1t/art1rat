@@ -20,12 +20,13 @@ pub fn is_dll() -> bool {
                 return false;
             }
             let mut path = [0u16; winapi::shared::minwindef::MAX_PATH as usize];
-            let len = GetModuleFileNameW(hmodule, path.as_mut_ptr(), winapi::shared::minwindef::MAX_PATH);
+            let len = GetModuleFileNameW(hmodule, path.as_mut_ptr(), winapi::shared::minwindef::MAX_PATH as u32);
             if len == 0 {
                 return false;
             }
             let s = String::from_utf16_lossy(&path[..len as usize]);
-            s.to_lowercase().ends_with(cryptify::encrypt_string!(".dll"))
+            let ext = cryptify::encrypt_string!(".dll");
+            s.to_lowercase().ends_with(&ext)
         }
     }
     #[cfg(not(target_os = "windows"))]

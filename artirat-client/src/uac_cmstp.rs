@@ -65,7 +65,7 @@ fn set_window_active() -> bool {
         if loop_limit == 0 {
             return false;
         }
-        thread::sleep(time::Duration::from_secs(0.3));
+        thread::sleep(time::Duration::from_millis(goldberg::goldberg_int!(1)));
     }
     if !window_handle.is_null() {
         unsafe {

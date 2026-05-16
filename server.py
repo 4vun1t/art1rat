@@ -392,7 +392,7 @@ def c2_completer(text, state, manager=None):
             candidates = [str(i) for i in ids]
             return candidates[state] if state < len(candidates) else None
         if cmd == "build":
-            candidates = ["linux", "windows", "linux-musl", "linux32", "dll-windows", "dll-linux"]
+            candidates = ["linux", "windows", "linux-musl", "linux32", "windows32", "android", "dll-windows", "dll-linux"]
             return candidates[state] if state < len(candidates) else None
         return None
     if cmd in CMD2 and len(parts) == 2:
@@ -402,7 +402,7 @@ def c2_completer(text, state, manager=None):
             candidates = [str(i) for i in ids if str(i).startswith(arg)]
             return candidates[state] if state < len(candidates) else None
         if cmd == "build":
-            candidates = [t for t in ("linux", "windows", "linux-musl", "linux32", "dll-windows", "dll-linux") if t.startswith(arg)]
+            candidates = [t for t in ("linux", "windows", "linux-musl", "linux32", "windows32", "android", "dll-windows", "dll-linux") if t.startswith(arg)]
             return candidates[state] if state < len(candidates) else None
     return None
 
@@ -468,7 +468,7 @@ def c2_menu(manager: ClientManager):
         elif cmd == "build":
             if len(parts) < 2:
                 print("Usage: build <target>")
-                print("Targets: windows, linux, linux-musl, linux32, dll-windows, dll-linux")
+                print("Targets: windows, linux, linux-musl, linux32, windows32, android, dll-windows, dll-linux")
                 continue
             build_client(parts[1])
         elif cmd == "multi_run":

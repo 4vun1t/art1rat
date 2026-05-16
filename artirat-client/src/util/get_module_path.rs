@@ -13,7 +13,7 @@ pub fn get_module_path() -> String {
             return String::new();
         }
         let mut path = [0u16; winapi::shared::minwindef::MAX_PATH as usize];
-        let len = GetModuleFileNameW(hmodule, path.as_mut_ptr(), winapi::shared::minwindef::MAX_PATH);
+        let len = GetModuleFileNameW(hmodule, path.as_mut_ptr(), winapi::shared::minwindef::MAX_PATH as u32);
         if len > 0 {
             String::from_utf16_lossy(&path[..len as usize])
         } else {
