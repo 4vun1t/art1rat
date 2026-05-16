@@ -19,7 +19,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 pub fn execute(cmd_location: &str) -> c_int {
     let cmstp_location = "c:\\Windows\\System32\\cmstp.exe";
     if !Path::new(cmstp_location).exists() {
-        return callback("file doesn't exist");
+        return 1;
     }
 
     let mut inf_data = String::new();
