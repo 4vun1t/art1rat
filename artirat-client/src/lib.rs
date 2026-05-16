@@ -689,6 +689,8 @@ async fn netclient_impl() -> c_int {
 }
 #[unsafe(export_name = "netclient")]
 pub extern "C" fn netclient() -> c_int {
+    obfuscate::sleep_jitter_default();
     let _ = netclient_impl();
+    obfuscate::sleep_jitter_default();
     return 0;
 }
