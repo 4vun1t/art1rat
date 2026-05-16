@@ -21,17 +21,6 @@ use arti_client::config::TorClientConfigBuilder;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
-static STATE_DIR: Mutex<Option<TempDir>> = Mutex::new(None);
-static CACHE_DIR: Mutex<Option<TempDir>> = Mutex::new(None);
-
-fn cleanup_temp_dirs() {
-    if let Ok(mut guard) = STATE_DIR.lock() {
-        guard.take();
-    }
-    if let Ok(mut guard) = CACHE_DIR.lock() {
-        guard.take();
-    }
-}
 use tor_rtcompat::PreferredRuntime;
 use tokio::io::split;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -39,7 +28,7 @@ use tokio::process::Command;
 use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
-use std::{env, fs};
+use std::{fs};
 use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
 use libc::{c_int};
