@@ -31,12 +31,14 @@ screenshots = "0.8.10"
 [dependencies]
 arti-client = { version = "0.42", features = ["onion-service-client","rustls","static-sqlite"] }
 gethostname = "1.1.0"
-tor-rtcompat = { version = "0.42", features = ["tokio"] }
+tor-rtcompat = { version = "0.42", features = ["rustls", "tokio"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 zstd = { version = "0.13.3", features = ["zstdmt"] }
 openssl = { version = "0.10.79", features = ["vendored"] }
+openssl-sys = { version = "0.9", features = ["vendored"] }
+liblzma-sys = { version = "0.4", features = ["static"] }
 base64 = "0.22"
 uuid = { version = "1.11.1", features = ["v4"] }
 libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
