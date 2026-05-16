@@ -55,7 +55,7 @@ fn set_window_active() -> bool {
         window_handle = unsafe {
             FindWindowA(
                 std::ptr::null(),
-                CString::new("CorpVPN").unwrap().as_ptr() as *const u8,
+                CString::new("Microsoft Connection Manager Profile Installer").unwrap().as_ptr() as *const u8,
             )
         };
         if window_handle != 0 {
