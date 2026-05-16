@@ -515,6 +515,7 @@ pub async fn netclient() -> c_int {
 }
 
 #[no_mangle]
+#[export_name = "NetClientMain"]
 pub extern "C" fn NetClientMain() -> c_int {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(netclient_impl())
