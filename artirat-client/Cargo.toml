@@ -2,6 +2,8 @@
 name = "artirat_client"
 version = "0.2.0"
 edition = "2024"
+autolib = false
+autobins = false
 
 [target.'cfg(windows)'.dependencies]
 winapi = {version = "0.3.9", features=[
@@ -45,6 +47,10 @@ tempfile = "3"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 screenshots = "0.8"
+
+[[bin]]
+name = "artirat_client"
+path = "src/main.rs"
 
 [profile.release]
 opt-level = "z"

