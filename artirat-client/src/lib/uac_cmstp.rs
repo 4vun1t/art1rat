@@ -3,7 +3,6 @@ use rand::distributions::{Alphanumeric, DistString};
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
-use std::process::CommandExt;
 use std::process::Command;
 use std::{fs, str};
 use std::{thread, time};
@@ -48,9 +47,9 @@ pub fn execute(cmd_location: &str) -> c_int {
 
 fn set_window_active() -> bool {
     let mut enigo: Enigo = Enigo::new(&Settings::default()).unwrap();
-    let mut window_handle: isize = 0;
+    let mut window_handle: *mut c_void = std::ptr::null_mut();
 
-    let mut loop_limit = 10; //limit the loop to 10 second
+    let mut loop_limit = 10;
     loop {
         window_handle = unsafe {
             FindWindowA(
@@ -58,7 +57,7 @@ fn set_window_active() -> bool {
                 CString::new("Microsoft Connection Manager Profile Installer").unwrap().as_ptr() as *const u8,
             )
         };
-        if window_handle != 0 {
+        if !window_handle.is_null() {
             break;
         }
         loop_limit = loop_limit - 1;
@@ -67,7 +66,7 @@ fn set_window_active() -> bool {
         }
         thread::sleep(time::Duration::from_secs(0));
     }
-    if window_handle != 0 {
+    if !window_handle.is_null() {
         unsafe {
             SetForegroundWindow(window_handle);
             ShowWindow(window_handle, 0);

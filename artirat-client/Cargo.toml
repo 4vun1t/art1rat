@@ -47,7 +47,7 @@ tempfile = "3"
 sysinfo = "0.39.1"
 itertools = "0.14.0"
 enigo = { version = "0.6.1", features = ["platform_specific", "tokio"] }
-rand = { version = "0.7.3", features = [] }
+rand = { version = "0.8", features = [] }
 [target.'cfg(not(target_os = "android"))'.dependencies]
 screenshots = "0.8.10"
 

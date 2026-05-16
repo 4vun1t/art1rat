@@ -15,6 +15,8 @@ pub mod portscanner;
 use is_elevated::is_elevated;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+use std::env;
 
 use arti_client::{TorClient, DataStream};
 use arti_client::config::TorClientConfigBuilder;

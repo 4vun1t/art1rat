@@ -1,6 +1,5 @@
 use std::time::Duration;
 use tokio::net::TcpStream;
-use std::mem;
 const TIMEOUT_SECS: u64 = 3;
 const CONCURRENT: usize = 200;
 
