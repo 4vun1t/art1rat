@@ -5,3 +5,4 @@ artirat-server/Cargo.lock
 artirat-client/config/hostname
 artirat-server/config
 artirat-client/config
+.c2*

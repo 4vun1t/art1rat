@@ -5,8 +5,7 @@ cd artirat-client
 for a in `echo " aarch64-linux-android x86_64-pc-windows-gnu i686-pc-windows-gnu x86_64-unknown-linux-musl i686-unknown-linux-musl x86_64-unknown-linux-gnu i686-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin "`
 do
     echo -e "[INFO] Building for $a"
-    cargo build --offline --release --lib --target $a
-    cargo build --offline --release --target $aa
+    cargo build --offline --release --target $a
     echo -e "[INFO] Done building for $a"
     
 done
