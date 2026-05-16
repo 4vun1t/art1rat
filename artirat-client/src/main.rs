@@ -6,6 +6,6 @@ use anyhow::Result;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    lib::netclient().await;
+    lib::netclient();
     Ok(())
 }

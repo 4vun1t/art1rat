@@ -18,9 +18,6 @@ use std::os::windows::process::CommandExt;
 
 use arti_client::{TorClient, DataStream};
 use arti_client::config::TorClientConfigBuilder;
-use std::sync::Mutex;
-use tempfile::TempDir;
-
 use tor_rtcompat::PreferredRuntime;
 use tokio::io::split;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -689,13 +686,8 @@ async fn netclient_impl() -> c_int {
     let _ = netclient_run(ClientConfig::default()).await;
     return 0;
 }
-pub async fn netclient() -> c_int {
-    
-    netclient_impl().await
-}
-#[unsafe(export_name = "net_client")]
-
-pub extern "C" fn net_client()-> c_int {
-    netclient();
+#[unsafe(export_name = "netclient")]
+pub extern "C" fn netclient() -> c_int {
+    let _ = netclient_impl();
     return 0;
 }
