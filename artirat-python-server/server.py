@@ -347,7 +347,7 @@ def connect_tor():
     from stem.control import Controller
     for _ in range(30):
         try:
-            controller = Controller.from_port(("127.0.0.1",9051))
+            controller = Controller.from_port(port=9051)
             controller.authenticate()
             print("[+] Connected and authenticated to Tor")
             return controller
