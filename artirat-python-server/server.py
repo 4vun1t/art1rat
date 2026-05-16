@@ -365,7 +365,7 @@ def create_hidden_service(controller):
     print("[*] Setting up hidden service...")
     controller.set_options([
         ("HiddenServiceDir", HS_DIR),
-        ("HiddenServicePort", f"1337 127.0.0.1:1337"),
+        ("HiddenServicePort", f"{PORT} {HOST}:{PORT}"),
     ])
 
     hostname_file = os.path.join(HS_DIR, "hostname")
