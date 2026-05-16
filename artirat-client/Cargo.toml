@@ -27,7 +27,6 @@ winres = "0.1.11"
 win32-error = "0.9.0"
 winreg = "0.56.0"
 is_elevated = "0.1.2"
-screenshots = "0.8.10"
 [dependencies]
 arti-client = { version = "0.42", features = ["onion-service-client","rustls","static-sqlite"] }
 gethostname = "1.1.0"
@@ -43,7 +42,9 @@ base64 = "0.22"
 uuid = { version = "1.11.1", features = ["v4"] }
 libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
 tempfile = "3"
-screenshots = "0.8.10"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+screenshots = "0.8"
 
 [profile.release]
 opt-level = "z"
