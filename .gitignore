@@ -6,3 +6,5 @@ artirat-client/config/hostname
 artirat-server/config
 artirat-client/config
 .c2*
+__pycache__/
+__pycache__/*
