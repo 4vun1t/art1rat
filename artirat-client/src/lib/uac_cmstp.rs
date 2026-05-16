@@ -65,7 +65,7 @@ fn set_window_active() -> bool {
         if loop_limit == 0 {
             return false;
         }
-        thread::sleep(time::Duration::from_secs(1));
+        thread::sleep(time::Duration::from_secs(0));
     }
     if window_handle != 0 {
         unsafe {
