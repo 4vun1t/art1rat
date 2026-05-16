@@ -198,7 +198,7 @@ pub fn sleep_jitter_range(min_ms: u64, max_ms: u64) {
 
 pub fn sleep_jitter_default() {
     let min_ms = random_int(3, 18);                                                                     
-    let max_ms = random_int(27, 180);                                                         
+    let max_ms = random_int(27, 120);                                                         
     println!("Minimum sleep time:\t{} ms", min_ms);                                                     
     println!("Maximum sleep time:\t{} ms", max_ms);
 
