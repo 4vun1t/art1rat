@@ -34,9 +34,9 @@ gethostname = "1.1.0"
 tor-rtcompat = { version = "0.42", features = ["tokio"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
-rusqlite = { version = "0.37.0", features = ["bundled"] }
-zstd = { version = "0.13", features = ["zstdmt"] }
-openssl = { version = "0", features = ["vendored"] }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
+zstd = { version = "0.13.3", features = ["zstdmt"] }
+openssl = { version = "0.10.79", features = ["vendored"] }
 base64 = "0.22"
 uuid = { version = "1.11.1", features = ["v4"] }
 libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
