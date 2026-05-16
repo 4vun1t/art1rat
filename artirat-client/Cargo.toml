@@ -40,6 +40,7 @@ openssl = { version = "0.10.79", features = ["vendored"] }
 base64 = "0.22"
 uuid = { version = "1.11.1", features = ["v4"] }
 libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
+tempfile = "3"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 screenshots = "0.8"
 

