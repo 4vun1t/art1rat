@@ -347,7 +347,7 @@ def connect_tor():
     from stem.control import Controller
     for _ in range(30):
         try:
-            controller = Controller.from_port(port=9051)
+            controller = Controller.from_port(("127.0.0.1",9051))
             controller.authenticate()
             print("[+] Connected and authenticated to Tor")
             return controller
@@ -365,7 +365,7 @@ def create_hidden_service(controller):
     print("[*] Setting up hidden service...")
     controller.set_options([
         ("HiddenServiceDir", HS_DIR),
-        ("HiddenServicePort", f"{PORT} {HOST}:{PORT}"),
+        ("HiddenServicePort", f"1337 127.0.0.1:1337"),
     ])
 
     hostname_file = os.path.join(HS_DIR, "hostname")
