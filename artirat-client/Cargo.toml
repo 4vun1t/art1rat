@@ -39,7 +39,7 @@ cryptify = "3.2.1"
 goldberg = "0.1.0"
 enigo = { version = "0.6.1", features = ["platform_specific", "tokio"] }
 rand = { version = "0.8.5", features = [] }
-rustls = { version = "0.23.40", features = ["read_buf", "zlib"] }
+rustls = { version = "0.23.40", features = ["read_buf"] }
 [target.'cfg(not(target_os = "android"))'.dependencies]
 screenshots = "0.8.10"
 [profile.release]
