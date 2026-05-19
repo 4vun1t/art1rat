@@ -37,11 +37,10 @@ openssl-sys = { version = "0.9.116", features = ["vendored"] }
 liblzma-sys = { version = "0.4.6", features = ["static"] }
 base64 = "0.22"
 libc = { version = "0.2.186", features = ["align", "extra_traits", "use_std"] }
-cryptify = "3.2.1"
-goldberg = "0.1.0"
 enigo = { version = "0.6.1", features = ["platform_specific", "tokio"] }
 rand = { version = "0.8.5", features = [] }
 rustls = { version = "0.23.40", features = ["read_buf"] }
+encstr = "0.0.1"
 [target.'cfg(not(target_os = "android"))'.dependencies]
 screenshots = "0.8.10"
 [profile.release]

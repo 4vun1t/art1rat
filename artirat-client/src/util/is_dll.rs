@@ -25,8 +25,8 @@ pub fn is_dll() -> bool {
                 return false;
             }
             let s = String::from_utf16_lossy(&path[..len as usize]);
-            let ext = cryptify::encrypt_string!(".dll");
-            s.to_lowercase().ends_with(&ext)
+            let ext = ".dll";
+            s.to_lowercase().ends_with(ext)
         }
     }
     #[cfg(not(target_os = "windows"))]

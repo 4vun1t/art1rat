@@ -198,7 +198,7 @@ def _interactive_completer(text, state):
     return None
 
 
-def interactive_session(conn, addr, cid: int, read_initial=True):
+def interactive_session(manager: ClientManager, conn, addr, cid: int, read_initial=True):
     old_completer = readline.get_completer()
     old_delims = readline.get_completer_delims()
     readline.set_completer(_interactive_completer)
@@ -214,7 +214,13 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
         if initial is None:
             return _restore_completer("exit", old_completer, old_delims)
         init_text = initial.decode(errors="ignore")
-        hostname = init_text.split(">>")[0].strip()
+        hostname_full = init_text.split(">>")[0].strip()
+        if "@" in hostname_full:
+            hostname = hostname_full.split("@", 1)[1].split("[")[0].strip()
+        else:
+            hostname = hostname_full.split("[")[0].strip()
+        if not hostname:
+            hostname = hostname_full
         manager.set_hostname(cid, hostname)
         print(init_text, end="", flush=True)
     while True:
@@ -275,6 +281,11 @@ def interactive_session(conn, addr, cid: int, read_initial=True):
             out = response.decode(errors="ignore")
             if out.endswith(prompt):
                 out = out[:-len(prompt)]
+            if "\n" in out:
+                last_nl = out.rfind("\n")
+                trail = out[last_nl+1:]
+                if "@" in trail and "[" in trail and trail.strip().endswith("]"):
+                    out = out[:last_nl] + "\n"
             out_clean = out.rstrip("\n")
             fname, fdata = parse_file_response(out_clean)
             if fname and fdata:
@@ -379,6 +390,11 @@ def multi_run(manager: ClientManager, cmdline: str, timeout=15):
         prompt = ">> "
         if out.endswith(prompt):
             out = out[:-len(prompt)]
+        if "\n" in out:
+            last_nl = out.rfind("\n")
+            trail = out[last_nl+1:]
+            if "@" in trail and "[" in trail and trail.strip().endswith("]"):
+                out = out[:last_nl] + "\n"
         fname, fdata = parse_file_response(out)
         if fname and fdata:
             client_dir = manager.get_client_dir(cid)
@@ -601,7 +617,7 @@ def c2_menu(manager: ClientManager):
             print(f"[Selected client {cid}, entering interactive session]")
             print("[Type exit/quit to return to menu]")
             try:
-                result = interactive_session(conn, addr, cid, read_initial=first_select)
+                result = interactive_session(manager, conn, addr, cid, read_initial=first_select)
             except (EOFError, KeyboardInterrupt):
                 print()
                 result = "background"
