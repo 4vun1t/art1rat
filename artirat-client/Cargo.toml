@@ -1,7 +1,7 @@
 #cargo-features = ["panic--abort"]
 [package]
 name = "artirat_client"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 
 [lib]
@@ -26,7 +26,7 @@ winreg = "0.56.0"
 is_elevated = "0.1.2"
 windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging"] }
 [dependencies]
-arti-client = { version = "0.42", default-features = false, features = ["anyhow", "async-std", "onion-service-client", "accel-openssl", "smol", "static", "static-sqlite", "tokio", "vanguards"] }
+arti-client = { version = "0.42", default-features = false, features = ["rustls","anyhow", "async-std", "onion-service-client", "accel-openssl", "smol", "static", "static-sqlite", "tokio", "vanguards"] }
 gethostname = "1.1.0"
 tor-rtcompat = { version = "0.42", features = ["rustls", "tokio"] }
 tokio = { version = "1.52.3", features = ["full"] }
