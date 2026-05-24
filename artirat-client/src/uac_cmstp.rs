@@ -1,14 +1,18 @@
+use encstr::{astr, cobl, opaque_false};
 use enigo::{Direction::Click, Enigo, Key, Keyboard, Settings};
 use rand::distributions::{Alphanumeric, DistString};
 use std::ffi::CString;
+use std::fs;
 use std::os::raw::{c_int, c_void};
 use std::path::Path;
 use std::process::Command;
-use std::fs;
-use std::{thread, time}; 
+use std::{thread, time};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
-use encstr::astr;
 pub fn execute(cmd_location: &str) -> c_int {
+    cobl!({
+    if opaque_false() {
+        return 1;
+    }
     let cmstp_location = astr!("c:\\windows\\system32\\CMSTP.exe");
     if !Path::new(&cmstp_location).exists() {
         return 1;
@@ -34,6 +38,7 @@ pub fn execute(cmd_location: &str) -> c_int {
     } else {
         return 1;
     }
+    })
 }
 
 fn set_window_active() -> bool {

