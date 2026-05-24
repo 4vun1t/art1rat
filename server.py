@@ -546,6 +546,11 @@ def build_client(target: str, verbose=False, static=False, upx=False):
         if static:
             rustflags = f"{rustflags} -C target-feature=+crt-static".strip()
         cmd = ["cargo", "build", "--release", "--bin", "artirat_client", "--target", t]
+
+    abs_project_dir = os.path.abspath(os.path.join(".", "artirat-client"))
+    home_dir = os.path.expanduser("~")
+    rustflags = f"{rustflags} --remap-path-prefix={abs_project_dir}=src --remap-path-prefix={home_dir}=~".strip()
+
     if rustflags:
         env["RUSTFLAGS"] = rustflags
 

@@ -12,8 +12,15 @@ crate-type = ["lib","staticlib","cdylib"]
 
 [target.'cfg(windows)'.dependencies]
 winapi = {version = "0.3.9", features=[
+    "debugapi",
+    "errhandlingapi",
+    "fileapi",
+    "handleapi",
     "libloaderapi",
+    "memoryapi",
     "minwindef",
+    "sysinfoapi",
+    "tlhelp32",
     "winuser"
 ] }
 windows = { version = "0.62.2", features = [

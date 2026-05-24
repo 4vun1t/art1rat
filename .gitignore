@@ -7,5 +7,7 @@ artirat-server/config
 artirat-client/config
 .c2*
 keylogger/
+clients/
+stream_config.txt
 __pycache__/
 __pycache__/*
