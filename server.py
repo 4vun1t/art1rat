@@ -195,6 +195,23 @@ CLIENT_COMMANDS = [
     "background",
 ]
 
+SHELL_COMMANDS = [
+    "ls", "cat", "pwd", "whoami", "id", "uname", "ps", "df", "du",
+    "mkdir", "rm", "cp", "mv", "chmod", "chown", "touch", "head",
+    "tail", "grep", "find", "sort", "wc", "echo", "env", "export",
+    "which", "type", "tree", "hostname", "ifconfig", "ip", "netstat",
+    "ss", "route", "ping", "curl", "wget", "nc", "nslookup", "dig",
+    "systemctl", "service", "journalctl", "kill", "pkill", "nohup",
+    "crontab", "at", "history", "alias", "source", "time", "xargs",
+    "tee", "cut", "tr", "sed", "awk", "diff", "patch", "tar", "gzip",
+    "gunzip", "bzip2", "xz", "zip", "unzip", "scp", "rsync", "ssh",
+    "su", "sudo", "passwd", "useradd", "usermod", "groupadd", "adduser",
+    "apt", "apt-get", "yum", "dnf", "pacman", "pkg",
+    "dir", "type", "copy", "move", "del", "ren", "findstr", "tasklist",
+    "taskkill", "systeminfo", "ipconfig", "tracert", "net", "sc",
+    "wmic", "reg", "schtasks", "mshta",
+]
+
 FILE_CMDS = {"download"}
 
 
@@ -224,6 +241,10 @@ def _interactive_completer(text, state):
         matches = [c for c in CLIENT_COMMANDS if c.startswith(text)]
         if state < len(matches):
             return matches[state]
+        state -= len(matches)
+        shell_matches = [c for c in SHELL_COMMANDS if c.startswith(text)]
+        if state < len(shell_matches):
+            return shell_matches[state]
     return None
 
 
