@@ -49,7 +49,7 @@ enigo = { version = "0.6.1", features = ["platform_specific", "tokio"] }
 rand = { version = "0.8.5", features = [] }
 rustls = { version = "0.23.40", features = ["read_buf"] }
 encstr = "0.0.2"
-tor-rtcompat = { version = "0.42.0", default-features = false, features = ["async-std", "rustls", "tokio"] }
+tor-rtcompat = { version = "0.42.0", default-features = false, features = [ "rustls", "tokio"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 screenshots = "0.8.10"
