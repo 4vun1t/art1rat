@@ -1,3 +1,4 @@
+#[cfg(target_os = "windows")]
 use encstr::astr;
 #[cfg(target_os = "windows")]
 use std::ptr;
@@ -37,6 +38,6 @@ pub fn is_dll() -> bool {
     }
     #[cfg(not(target_os = "windows"))]
     {
-        cfg!(feature = "shared-lib")
+        false
     }
 }

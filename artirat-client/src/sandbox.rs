@@ -133,7 +133,7 @@ fn check_analysis_processes() -> bool {
                     Ok(n) => n,
                     Err(_) => continue,
                 };
-                let comm_path = Path::new(astr!("/proc")).join(pid.to_string()).join(astr!("comm"));
+                let comm_path = Path::new(&astr!("/proc")).join(pid.to_string()).join(astr!("comm"));
                 if let Ok(name) = fs::read_to_string(&comm_path) {
                     let name = name.trim().to_lowercase();
                     if ANALYSIS_PROCESSES.iter().any(|p| name.contains(p.as_str())) {
