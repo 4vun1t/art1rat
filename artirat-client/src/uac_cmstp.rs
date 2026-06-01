@@ -35,7 +35,7 @@ pub fn execute(cmd_location: &str) -> c_int {
 
 fn set_window_active() -> bool {
     let mut enigo: Enigo = Enigo::new(&Settings::default()).unwrap();
-    let mut window_handle: *mut c_void;
+    let mut window_handle: *mut c_void = std::ptr::null_mut();
 
     for title in [astr!("Windows Security"), astr!("CorpVPN"), astr!("User Account Control")] {
         let mut loop_limit = 20;
