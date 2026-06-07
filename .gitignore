@@ -1,6 +1,7 @@
 artirat-client/target/
 artirat-client/Cargo.lock
 dist/
+dist/*s
 artirat-server/target/
 artirat-server/Cargo.lock
 artirat-client/config/hostname

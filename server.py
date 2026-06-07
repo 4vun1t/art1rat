@@ -750,7 +750,8 @@ def build_client(target: str, verbose=False, static=False, upx=False):
             print(f"    Manually run: objcopy -O binary '{src_path}' '{out_name}'")
         except subprocess.CalledProcessError as e:
             print(f"[-] objcopy failed: {e.stderr or e}")
-    else:
+    _dist_binaries(t)
+    if not is_shellcode:
         print(f"[+] Build succeeded for {t}")
         if upx and not is_shellcode:
             src_name = "artirat_client" + (".exe" if "windows" in target else "")
@@ -773,11 +774,15 @@ def build_client(target: str, verbose=False, static=False, upx=False):
             else:
                 print(f"[-] UPX: binary not found at {bin_path}")
 
-        # Also build shared library version (DLL/SO) for non-dll, non-shellcode targets
+        _dist_binaries(t)
+
+        # Also build shared/static library version (DLL/SO + .a) for non-dll, non-shellcode targets.
         if not is_dll:
             print(f"[*] Building shared library for {t}...")
             shared_env = env.copy()
             shared_rustflags = shared_env.get("RUSTFLAGS", "")
+            # Remove +crt-static from shared library build (DLLs/SOs use dynamic CRT)
+            shared_rustflags = shared_rustflags.replace("-C target-feature=+crt-static", "").strip()
             shared_rustflags = f"{shared_rustflags} --remap-path-prefix={abs_project_dir}=src --remap-path-prefix={home_dir}=~".strip()
             if shared_rustflags:
                 shared_env["RUSTFLAGS"] = shared_rustflags
@@ -785,6 +790,7 @@ def build_client(target: str, verbose=False, static=False, upx=False):
             shared_rc = _stream_cargo(shared_cmd, os.path.join(".", "artirat-client"), shared_env, verbose)
             if shared_rc == 0:
                 print(f"[+] Shared library build succeeded for {t}")
+                _dist_binaries(t)
             else:
                 print(f"[-] Shared library build failed for {t} (exit code {shared_rc})")
 
@@ -816,7 +822,6 @@ def build_client(target: str, verbose=False, static=False, upx=False):
                     print(f"[-] cbindgen failed: {header_result.stderr.strip()}")
         else:
             print(f"[-] cbindgen installation failed: {cbindgen_code.stderr.strip()}")
-    _dist_binaries(t)
     return True
 
 

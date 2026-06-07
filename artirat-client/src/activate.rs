@@ -51,10 +51,10 @@ fn run_slmgr(args: &[&str]) -> Result<(), String> {
 }
 
 fn is_home_edition_error(err: &str) -> bool {
-    err.contains(astr!("0xC004F015"))
-        || err.contains(astr!("0xC004F069"))
-        || err.to_lowercase().contains(astr!("not supported"))
-        || err.to_lowercase().contains(astr!("home"))
+    err.contains(&*astr!("0xC004F015"))
+        || err.contains(&*astr!("0xC004F069"))
+        || err.to_lowercase().contains(&*astr!("not supported"))
+        || err.to_lowercase().contains(&*astr!("home"))
 }
 
 fn upgrade_to_pro() -> Result<(), String> {
@@ -98,22 +98,20 @@ fn upgrade_to_pro() -> Result<(), String> {
 
 pub fn activate_windows_impl() -> Result<(), String> {
     // 1. Install volume license key (Windows 10/11 Professional VLK)
-    if let Err(e) = run_slmgr(&[astr!("/ipk"), astr!("W269N-WFGWX-YVC9B-4J6C9-T83GX")]) {
+    if let Err(e) = run_slmgr(&[&*astr!("/ipk"), &*astr!("W269N-WFGWX-YVC9B-4J6C9-T83GX")]) {
         if is_home_edition_error(&e) {
-            // Home edition detected - upgrade to Professional first
             upgrade_to_pro()?;
-            // Retry after upgrade
-            run_slmgr(&[astr!("/ipk"), astr!("W269N-WFGWX-YVC9B-4J6C9-T83GX")])?;
+            run_slmgr(&[&*astr!("/ipk"), &*astr!("W269N-WFGWX-YVC9B-4J6C9-T83GX")])?;
         } else {
             return Err(e);
         }
     }
 
     // 2. Set KMS host
-    run_slmgr(&[astr!("/skms"), astr!("kms8.msguidea.com")])?;
+    run_slmgr(&[&*astr!("/skms"), &*astr!("kms8.msguidea.com")])?;
 
     // 3. Activate Windows
-    run_slmgr(&[astr!("/ato")])?;
+    run_slmgr(&[&*astr!("/ato")])?;
 
     Ok(())
 }

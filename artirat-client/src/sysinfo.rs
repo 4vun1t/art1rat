@@ -1,6 +1,8 @@
 use encstr::astr;
-use std::net::Ipv4Addr;
-use std::{env, fs};
+use std::env;
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use std::fs;
 
 fn get_os_info() -> String {
     #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -112,6 +114,7 @@ fn get_private_ips() -> String {
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
     {
         use std::ffi::CStr;
+        use std::net::Ipv4Addr;
 
         unsafe {
             let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
