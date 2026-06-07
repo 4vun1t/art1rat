@@ -1,5 +1,6 @@
 artirat-client/target/
 artirat-client/Cargo.lock
+dist/
 artirat-server/target/
 artirat-server/Cargo.lock
 artirat-client/config/hostname
@@ -12,3 +13,4 @@ stream_config.txt
 __pycache__/
 __pycache__/*
 vanguards.state
+.autorun*
