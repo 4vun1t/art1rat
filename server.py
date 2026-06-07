@@ -617,19 +617,23 @@ def _dist_binaries(target_triple: str):
     dist_dir = os.path.join(".", "dist", target_triple)
     os.makedirs(dist_dir, exist_ok=True)
     keep_basenames = {"artirat_client", "libartirat_client"}
-    keep_exts = {".so", ".dll", ".a", ""}
-    for item in os.listdir(release_dir):
-        item_path = os.path.join(release_dir, item)
-        name, ext = os.path.splitext(item)
-        if name in keep_basenames and ext in keep_exts and os.path.isfile(item_path):
-            shutil.copy2(item_path, os.path.join(dist_dir, item))
-            print(f"  -> dist/{target_triple}/{item}")
-    # Copy C header if generated
-    h_path = os.path.join(".", "artirat-client", "artirat_client.h")
-    if os.path.exists(h_path):
-        shutil.copy2(h_path, os.path.join(dist_dir, "artirat_client.h"))
-        print(f"  -> dist/{target_triple}/artirat_client.h")
-    shutil.rmtree(os.path.join(".", "artirat-client", "target"))
+    keep_exts = {".so", ".dll", ".a", ".exe", ""}
+    try:
+        for item in os.listdir(release_dir):
+            item_path = os.path.join(release_dir, item)
+            name, ext = os.path.splitext(item)
+            if name in keep_basenames and ext in keep_exts and os.path.isfile(item_path):
+                shutil.copy2(item_path, os.path.join(dist_dir, item))
+                print(f"  -> dist/{target_triple}/{item}")
+        h_path = os.path.join(".", "artirat-client", "artirat_client.h")
+        if os.path.exists(h_path):
+            shutil.copy2(h_path, os.path.join(dist_dir, "artirat_client.h"))
+            print(f"  -> dist/{target_triple}/artirat_client.h")
+    except Exception as e:
+        print(f"[-] Failed to copy build artifacts: {e}")
+        return
+    _clean_target(target_triple)
+    print(f"[*] Cleaned build artifacts for {target_triple}")
 
 
 def build_client(target: str, verbose=False, static=False, upx=False):
@@ -671,8 +675,6 @@ def build_client(target: str, verbose=False, static=False, upx=False):
             print(f"[-] Failed to install target {t}: {inst.stderr.strip()}")
             return False
         print(f"[+] Installed target {t}")
-    print(f"[*] Cleaning target directory for {t}...")
-    _clean_target(t)
     print(f"[*] Building {kind} for {t} (this may take a while)...")
     env = os.environ.copy()
     if target == "android" or t == "aarch64-linux-android":
@@ -998,25 +1000,6 @@ def write_config():
         hostname = get_hostname_from_dir(hs_dir)
         if hostname:
             lines.append(f"{hostname}:{port}")
-    # Ephemeral hidden service via Tor controller
-    try:
-        from stem.control import Controller
-        controller = Controller.from_port(port=9051)
-        controller.authenticate()
-        print("[+] Connected to Tor for ephemeral hidden service")
-        resp = controller.msg(f"ADD_ONION NEW:BEST Port=1337,127.0.0.1:{PORT}")
-        if resp.is_ok():
-            pairs = dict(line.split("=", 1) for line in resp if "=" in line)
-            service_id = pairs.get("ServiceID", "")
-            onion = f"{service_id}.onion:1337"
-            if onion not in lines:
-                lines.append(onion)
-                print(f"[+] Ephemeral hidden service: {onion}")
-        else:
-            print(f"[-] ADD_ONION failed: {resp}")
-        controller.close()
-    except Exception as e:
-        print(f"[-] Could not create ephemeral hidden service via stem: {e}")
 
     # Persistent hidden service hostname from disk (if available)
     hs_hostname = get_hostname_from_dir(os.path.join(SERVER_CONFIG_DIR, "hidden_service"))
@@ -1025,6 +1008,9 @@ def write_config():
         if entry not in lines:
             lines.append(entry)
             print(f"[+] Using persistent hidden service: {hs_hostname}")
+    else:
+        print("[*] Persistent hidden service not yet configured — create one with configure_tor")
+        print("    or set up manually in torrc")
 
     if lines:
         os.makedirs(CLIENT_CONFIG_DIR, exist_ok=True)
