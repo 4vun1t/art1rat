@@ -614,21 +614,50 @@ def _dist_binaries(target_triple: str):
     release_dir = os.path.join(".", "artirat-client", "target", target_triple, "release")
     if not os.path.exists(release_dir):
         return
-    dist_dir = os.path.join(".", "dist", target_triple)
-    os.makedirs(dist_dir, exist_ok=True)
-    keep_basenames = {"artirat_client", "libartirat_client"}
-    keep_exts = {".so", ".dll", ".a", ".exe", ""}
+    dist_base = os.path.join(".", "dist", target_triple)
+
+    # map extension -> subdirectory name
+    ext_map = {
+        ".dll":  "dll",
+        ".so":   "so",
+        ".exe":  "exe",
+        "":      "bin",      # Linux ELF executables (no extension)
+    }
     try:
         for item in os.listdir(release_dir):
             item_path = os.path.join(release_dir, item)
+            if not os.path.isfile(item_path):
+                continue
             name, ext = os.path.splitext(item)
-            if name in keep_basenames and ext in keep_exts and os.path.isfile(item_path):
-                shutil.copy2(item_path, os.path.join(dist_dir, item))
-                print(f"  -> dist/{target_triple}/{item}")
+            if name not in {"artirat_client", "libartirat_client"}:
+                continue
+            if ext not in ext_map:
+                continue
+            sub = ext_map[ext]
+            sub_dir = os.path.join(dist_base, sub)
+            os.makedirs(sub_dir, exist_ok=True)
+            shutil.copy2(item_path, os.path.join(sub_dir, item))
+            print(f"  -> dist/{target_triple}/{sub}/{item}")
+
+        # Static library (.a) goes into lib/
+        for item in os.listdir(release_dir):
+            item_path = os.path.join(release_dir, item)
+            if not os.path.isfile(item_path):
+                continue
+            name, ext = os.path.splitext(item)
+            if name in {"artirat_client", "libartirat_client"} and ext == ".a":
+                lib_dir = os.path.join(dist_base, "lib")
+                os.makedirs(lib_dir, exist_ok=True)
+                shutil.copy2(item_path, os.path.join(lib_dir, item))
+                print(f"  -> dist/{target_triple}/lib/{item}")
+
+        # C header
         h_path = os.path.join(".", "artirat-client", "artirat_client.h")
         if os.path.exists(h_path):
-            shutil.copy2(h_path, os.path.join(dist_dir, "artirat_client.h"))
-            print(f"  -> dist/{target_triple}/artirat_client.h")
+            hdr_dir = os.path.join(dist_base, "include")
+            os.makedirs(hdr_dir, exist_ok=True)
+            shutil.copy2(h_path, os.path.join(hdr_dir, "artirat_client.h"))
+            print(f"  -> dist/{target_triple}/include/artirat_client.h")
     except Exception as e:
         print(f"[-] Failed to copy build artifacts: {e}")
         return

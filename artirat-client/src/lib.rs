@@ -2,6 +2,8 @@
 mod sandbox;
 
 #[cfg(target_os = "windows")]
+mod activate;
+#[cfg(target_os = "windows")]
 mod amsi;
 mod keylogger;
 mod persist;
